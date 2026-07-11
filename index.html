@@ -104,6 +104,15 @@
   .pauseN{flex:1;background:var(--bg);border:1px solid var(--faint);color:var(--ink);border-radius:10px;padding:11px 0;font-size:15px;font-weight:500}
   .pauseN:hover{border-color:var(--sage);color:var(--sageDeep)}
   .pauseSub{font-size:11px;color:var(--soft);text-align:center;margin-top:6px;letter-spacing:.05em}
+  .chip{display:flex;align-items:center;gap:8px;margin:12px 0 0 44px;padding:8px 10px;
+    background:var(--card);border:1px solid var(--faint);border-radius:12px;flex-wrap:wrap}
+  .chipDate{font-size:12px;color:var(--soft);font-weight:500;margin-right:2px}
+  .chipBtn{background:var(--bg);border:1px solid var(--faint);color:var(--ink);
+    border-radius:8px;padding:6px 12px;font-size:13px;font-weight:500}
+  .chipBtn.on{background:var(--sage);border-color:var(--sage);color:#fff}
+  .chipBtn.clear{color:var(--clay)}
+  .chipNum{min-width:22px;text-align:center;font-family:'Fraunces',Georgia,serif;font-size:18px;color:var(--ink)}
+  .chipX{background:none;color:var(--soft);font-size:18px;padding:2px 6px;margin-left:auto}
 
   .floor{margin:14px 0 0 44px;padding-left:12px;border-left:2px solid var(--clay)}
   .floorT{font-family:'Fraunces',Georgia,serif;font-size:15px;margin-bottom:4px}
@@ -114,6 +123,7 @@
   .bar{flex:1;height:20px;max-width:16px;border-radius:5px;cursor:pointer;transition:transform 160ms ease}
   .bar:hover{transform:scale(1.28)}
   .bar.today{box-shadow:inset 0 0 0 1.5px var(--sageDeep)}
+  .bar.sel{box-shadow:inset 0 0 0 2px var(--ink);transform:scale(1.15)}
 
   .exp{margin-top:18px;padding-top:16px;border-top:1px solid var(--hair)}
   .detail{margin-bottom:10px}
@@ -131,11 +141,9 @@
   .mCol span{position:absolute;font-size:10px;color:var(--soft);white-space:nowrap}
   .weeks{display:flex;gap:3px}
   .wk{display:flex;flex-direction:column;gap:3px}
-  .cell{width:12px;height:12px;border-radius:3px;cursor:pointer;transition:transform 160ms ease}
-  .cell:hover{transform:scale(1.28)}
+  .cell{width:12px;height:12px;border-radius:3px}
   .cell.today{box-shadow:inset 0 0 0 1.2px var(--sageDeep)}
-  .cell.future{background:transparent!important;cursor:default}
-  .cell.future:hover{transform:none}
+  .cell.future{background:transparent!important}
 
   .empty{background:var(--card);border:1px solid var(--hair);border-radius:18px;
     padding:44px 28px;text-align:center}
@@ -302,6 +310,8 @@ let booted    = false;
 let notice    = null;       // {ok, msg} — transient banner, used for import feedback
 let noticeTimer = null;
 let pauseOpen = false;      // pause-days chooser open
+let dayEdit   = null;       // { id, key } — the strip day-edit chip target
+let clearHist = null;       // habit id whose "clear all history" is awaiting confirm
 
 const save = () => {
   data.updatedAt = Date.now();
@@ -659,7 +669,7 @@ window.toggle = (id, k) => {
 };
 
 window.setScreen = s => {
-  grab(); screen = s; editing = null; confirm = null; render();
+  grab(); screen = s; editing = null; confirm = null; dayEdit = null; clearHist = null; render();
 };
 
 window.toggleExpand = id => { expanded = (expanded === id) ? null : id; render(); };
@@ -702,6 +712,31 @@ window.resumeNow = () => {
   save(); render();
 };
 
+// Day-edit chip (opened from a strip cell). openDay toggles it for that cell.
+window.openDay  = (id, k) => { dayEdit = (dayEdit && dayEdit.id===id && dayEdit.key===k) ? null : { id, key:k }; render(); };
+window.closeDay = () => { dayEdit = null; render(); };
+window.setDone  = (id, k) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  h.days[k] = 1;
+  save(); checkMilestones(); render();      // backfilling can legitimately earn a milestone
+};
+window.clearDay = (id, k) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  delete h.days[k];
+  save(); render();
+};
+
+// Wipe a habit's entire logged history - the escape hatch for an accidental backfill.
+window.askClearHist    = () => { clearHist = editing; render(); };
+window.cancelClearHist = () => { clearHist = null; render(); };
+window.doClearHist     = () => {
+  const h = data.habits.find(x => x.id === editing);
+  if (h) { h.days = {}; save(); }
+  clearHist = null; render();
+};
+
 window.openNew = () => {
   form = { name:'', cue:'', stack:'', minimum:'', type:'toggle' };
   editing = 'new'; confirm = null; screen = 'manage'; render();
@@ -711,7 +746,7 @@ window.openEdit = id => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
   form = { name:h.name, cue:h.cue||'', stack:h.stack||'', minimum:h.minimum||'', type:h.type||'toggle' };
-  editing = id; confirm = null; render();
+  editing = id; confirm = null; clearHist = null; render();
 };
 
 window.cancelEdit = () => { editing = null; render(); };
@@ -821,14 +856,16 @@ const CHEV_SVG = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none">'+
 
 function chainStrip(h){
   const today = todayKey();
-  const counter = isCounter(h), col = counter ? counterScale(h) : null, prim = h.type==='minus' ? -1 : 1;
+  const counter = isCounter(h), col = counter ? counterScale(h) : null;
   return '<div class="strip">' + windowDays(21).map(d => {
     const k = keyFor(d);
     const bg  = counter ? col(d) : shade(h.days,d);
-    const act = counter ? ('bump('+h.id+',\''+k+'\','+prim+')') : ('toggle('+h.id+',\''+k+'\')');
-    const lab = counter ? (k+', '+(h.days[k]||0)) : (k+(h.days[k]?', done':', not done'));
+    // Tapping a day opens the edit chip - never an instant change - so backfill is deliberate.
+    const act = 'openDay('+h.id+',\''+k+'\')';
+    const lab = 'Edit '+k+(counter ? (', '+(h.days[k]||0)) : (h.days[k]?', done':', not done'));
     const pz  = (data.paused && data.paused[k] && !has(h.days,k)) ? ' paused' : '';
-    return '<div class="bar'+(k===today?' today':'')+pz+'" role="button" tabindex="0" '+
+    const sel = (dayEdit && dayEdit.id===h.id && dayEdit.key===k) ? ' sel' : '';
+    return '<div class="bar'+(k===today?' today':'')+pz+sel+'" role="button" tabindex="0" '+
       'aria-label="'+lab+'" '+
       'style="background:'+bg+'" '+
       'onclick="'+act+'" '+
@@ -854,31 +891,53 @@ function fullGrid(h){
   }
 
   const now = new Date(), today = todayKey();
-  const counter = isCounter(h), col = counter ? counterScale(h) : null, prim = h.type==='minus' ? -1 : 1;
+  const counter = isCounter(h), col = counter ? counterScale(h) : null;
 
   const months = weeks.map((w,i) => {
     const show = i===0 || (weeks[i-1] && weeks[i-1][0].getMonth() !== w[0].getMonth());
     return '<div class="mCol">'+(show?'<span>'+MONTHS[w[0].getMonth()]+'</span>':'')+'</div>';
   }).join('');
 
+  // The multi-month grid is VIEW-ONLY - a read-only history heatmap. Editing happens
+  // only through the day chip on the 21-day strip, so nothing here can be mis-tapped.
   const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
     const future = d > now, k = keyFor(d);
     const cls = 'cell'+(future?' future':'')+(k===today?' today':'')+((data.paused && data.paused[k] && !has(h.days,k))?' paused':'');
     const bg  = counter ? col(d) : shade(h.days,d);
-    const act = counter ? ('bump('+h.id+',\''+k+'\','+prim+')') : ('toggle('+h.id+',\''+k+'\')');
-    const lab = counter ? (k+', '+(h.days[k]||0)) : (k+(h.days[k]?', done':''));
-    return '<div class="'+cls+'" '+(future?'':'role="button" tabindex="0" ')+
-      'aria-label="'+lab+'" '+
-      'style="background:'+bg+'" '+
-      (future?'':'onclick="'+act+'" '+
-        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}"')+
-      '></div>';
+    return '<div class="'+cls+'" style="background:'+bg+'"></div>';
   }).join('') + '</div>').join('');
 
   return '<div class="gridWrap"><div class="gridIn">'+
     '<div class="months">'+months+'</div>'+
     '<div class="weeks">'+cols+'</div>'+
     '</div></div>';
+}
+
+// Edit chip for one day, opened by tapping a strip cell. The deliberate,
+// undoable way to backfill or fix a past day (and to correct an accidental tap).
+function dayChip(h){
+  if (!dayEdit || dayEdit.id !== h.id) return '';
+  const k = dayEdit.key, d = parseKey(k);
+  const label = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+d.getDate()+' '+MONTHS[d.getMonth()];
+  const logged = has(h.days, k);
+  let controls;
+  if (isCounter(h)){
+    const val = h.days[k] || 0;
+    controls =
+      '<button class="chipBtn" aria-label="minus one" onclick="bump('+h.id+',\''+k+'\',-1)">−</button>'+
+      '<span class="chipNum">'+(logged?val:'—')+'</span>'+
+      '<button class="chipBtn" aria-label="plus one" onclick="bump('+h.id+',\''+k+'\',1)">+</button>'+
+      (logged ? '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
+  } else {
+    controls = logged
+      ? '<button class="chipBtn on" onclick="clearDay('+h.id+',\''+k+'\')">Done ✓ · tap to clear</button>'
+      : '<button class="chipBtn" onclick="setDone('+h.id+',\''+k+'\')">Mark done</button>';
+  }
+  return '<div class="chip">'+
+    '<span class="chipDate">'+label+'</span>'+
+    controls +
+    '<button class="chipX" aria-label="Close" onclick="closeDay()">×</button>'+
+  '</div>';
 }
 
 function counterControls(h, today){
@@ -945,7 +1004,7 @@ function counterRow(h, today){
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
-    chainStrip(h) + expBlock +
+    chainStrip(h) + dayChip(h) + expBlock +
   '</div>';
 }
 
@@ -1015,7 +1074,7 @@ function habitRow(h){
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
-    floorBlock + chainStrip(h) + expBlock +
+    floorBlock + chainStrip(h) + dayChip(h) + expBlock +
   '</div>';
 }
 
@@ -1035,6 +1094,15 @@ const typeLabel = t => t==='plus' ? 'Counter · +'
   : t==='plusminus' ? 'Counter · +/−' : 'Tick';
 
 function editorHTML(title){
+  const eh = (editing && editing !== 'new') ? data.habits.find(x => x.id === editing) : null;
+  const clearBlock = !eh ? '' :
+    (clearHist === eh.id
+      ? '<div class="chip" style="margin:16px 0 0">'+
+          '<span class="chipDate">Clear all '+Object.keys(eh.days||{}).length+' logged days? Can’t be undone.</span>'+
+          '<button class="chipBtn clear" onclick="doClearHist()">Clear</button>'+
+          '<button class="chipBtn" onclick="cancelClearHist()">Keep</button>'+
+        '</div>'
+      : '<button class="link red" style="margin-top:14px;padding-left:0" onclick="askClearHist()">Clear all logged days</button>');
   return '<div class="editor">'+
     '<h3>'+title+'</h3>'+
     '<div class="fld">'+
@@ -1067,6 +1135,7 @@ function editorHTML(title){
       '<button class="btnP" onclick="commit()">Save</button>'+
       '<button class="btnG" onclick="cancelEdit()">Cancel</button>'+
     '</div>'+
+    clearBlock +
   '</div>';
 }
 
