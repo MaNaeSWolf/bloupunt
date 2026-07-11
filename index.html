@@ -297,6 +297,8 @@ try {
 
 let syncStatus = sync.token ? 'idle' : 'off';   // off | idle | syncing | ok | error
 let pushTimer = null;
+let pendingPush = false;    // an unsynced local change is waiting to be pushed
+let lastSha = null;         // last known remote file sha, for a GET-less flush on close
 
 let screen    = 'today';    // today | manage
 let editing   = null;       // habit id | 'new' | null
@@ -316,7 +318,7 @@ let clearHist = null;       // habit id whose "clear all history" is awaiting co
 const save = () => {
   data.updatedAt = Date.now();
   try { localStorage.setItem('bloupunt-data', JSON.stringify(data)); } catch(e){}
-  if (syncReady()) { clearTimeout(pushTimer); pushTimer = setTimeout(pushRemote, 1500); }
+  if (syncReady()) { pendingPush = true; clearTimeout(pushTimer); pushTimer = setTimeout(pushRemote, 1500); }
 };
 
 /* ═══════════════ SYNC — encrypted blob in a private GitHub repo ═══════════════
@@ -411,9 +413,10 @@ function setSyncStatus(s){
 
 async function ghGet(){
   const res = await fetch(GH_URL(), { headers: GH_HEADERS(), cache:'no-store' });
-  if (res.status === 404) return { sha:null, body:null };
+  if (res.status === 404){ lastSha = null; return { sha:null, body:null }; }
   if (!res.ok){ const err = new Error('gh ' + res.status); err.status = res.status; throw err; }
   const j = await res.json();
+  lastSha = j.sha;
   return { sha:j.sha, body: JSON.parse(unb64utf8(j.content.replace(/\n/g,''))) };
 }
 
@@ -434,10 +437,34 @@ async function pushRemote(){
       body: JSON.stringify(payload)
     });
     if (!res.ok){ const err = new Error('put ' + res.status); err.status = res.status; throw err; }
+    try { lastSha = (await res.json()).content.sha; } catch(e){}
+    pendingPush = false;
     setSyncStatus('ok');
   } catch(e) {
     setSyncStatus(e && e.status === 401 ? 'expired' : 'error');
   }
+}
+
+// Flush an unsynced change immediately when the page is hidden or closing, so
+// "set up on PC, close, open phone" actually propagates. Skips the GET (uses the
+// cached sha) and sets keepalive so the request survives page unload.
+async function flushPush(){
+  if (!syncReady() || !pendingPush) return;
+  clearTimeout(pushTimer);
+  try {
+    const pkg = await encryptData(data, sync.pass);
+    const payload = {
+      message: 'bloupunt sync ' + new Date().toISOString(),
+      content: b64utf8(JSON.stringify({ updatedAt: data.updatedAt, pkg }))
+    };
+    if (lastSha) payload.sha = lastSha;
+    const res = await fetch(GH_URL(), {
+      method:'PUT', keepalive:true,
+      headers:{ ...GH_HEADERS(), 'Content-Type':'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok){ pendingPush = false; try { lastSha = (await res.json()).content.sha; } catch(e){} }
+  } catch(e){}
 }
 
 async function pullRemote(){
@@ -475,8 +502,10 @@ function autoPull(){
   lastPull = now;
   pullRemote();
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden) autoPull(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) flushPush(); else autoPull(); });
+window.addEventListener('pagehide', flushPush);   // fires on tab close / app background
 window.addEventListener('focus', autoPull);
+window.addEventListener('pageshow', autoPull);    // bfcache restore
 
 /* ═══════════════ STATS ═══════════════ */
 
