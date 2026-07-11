@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#F7F4EF">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>Bloupunt</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23F7F4EF'/%3E%3Cpath d='M14 74 L38 34 L52 56 L64 40 L86 74 Z' fill='%237A9A7E'/%3E%3Ccircle cx='64' cy='30' r='6' fill='%23B08D3F'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23F7F4EF'/%3E%3Cpath d='M14 74 L38 34 L52 56 L64 40 L86 74 Z' fill='%237A9A7E'/%3E%3Ccircle cx='64' cy='30' r='6' fill='%23B08D3F'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F7F4EF; --card:#FFFFFF; --ink:#3D3B37; --soft:#8A857D;
+    --faint:#DDD8D0; --hair:#EBE6DE;
+    --sage:#7A9A7E; --sageDeep:#5E8163;
+    --clay:#C0836B; --clayBg:#FBEEE9;
+    --amber:#C9A961; --amberBg:#FAF3E4; --amberInk:#9C7F3E;
+    --gold:#B08D3F;
+    --tint:transparent;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+    transition:background 900ms ease;
+    min-height:100vh;
+  }
+  #glow{
+    position:fixed; inset:0; pointer-events:none; z-index:0;
+    background:radial-gradient(120% 80% at 50% -20%, var(--tint), transparent 70%);
+    transition:background 900ms ease;
+  }
+  #app{position:relative; z-index:1; max-width:560px; margin:0 auto; padding:28px 16px 44px}
+  .serif{font-family:'Fraunces',Georgia,serif}
+  h1{font-family:'Fraunces',Georgia,serif;font-size:28px;font-weight:400;letter-spacing:-.01em;margin:0}
+  p{margin:0}
+  button{font-family:inherit;cursor:pointer;border:none;border-radius:999px;transition:all 180ms ease}
+  input{font-family:inherit;width:100%;border:1px solid var(--faint);border-radius:10px;
+    padding:10px 12px;font-size:16px;color:var(--ink);background:var(--bg)}
+  input::placeholder{color:#BFB9B0}
+  button:focus-visible,input:focus-visible,[role=button]:focus-visible{outline:2px solid var(--sage);outline-offset:2px}
+
+  .head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:26px}
+  .brand{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--sageDeep);
+    font-weight:600;margin-bottom:7px;transition:color 600ms ease}
+  .brand.gold{color:var(--gold)}
+  .sub{margin-top:5px;font-size:13px;color:var(--soft)}
+  .navBtn{background:var(--card);border:1px solid var(--faint);color:var(--soft);
+    padding:9px 16px;font-size:13px;font-weight:500;flex-shrink:0}
+
+  .stack{display:flex;flex-direction:column;gap:12px}
+  .row{background:var(--card);border:1px solid var(--hair);border-radius:18px;padding:16px 18px;
+    transition:border-color 200ms ease,box-shadow 200ms ease,background 200ms ease}
+  .row:hover{box-shadow:0 3px 16px rgba(61,59,55,.06)}
+  .row.done{border-color:#CBDCCD}
+  .row.warn{border-color:var(--amber);background:var(--amberBg)}
+  .row.alarm{border:1.5px solid var(--clay);background:var(--clayBg)}
+
+  .top{display:flex;align-items:center;gap:14px}
+  .tick{width:30px;height:30px;flex-shrink:0;border-radius:50%;background:transparent;
+    border:1.5px solid var(--faint);display:grid;place-items:center}
+  .tick.on{background:var(--sage);border:none}
+  .warn .tick{border-color:var(--amber)}
+  .alarm .tick{border-color:var(--clay)}
+  .nameBtn{flex:1;background:none;text-align:left;padding:0;border-radius:6px}
+  .nameLine{display:flex;align-items:center;gap:7px}
+  .hname{font-size:16px;font-weight:500;line-height:1.35}
+  .done .hname{color:var(--soft);text-decoration:line-through;text-decoration-color:var(--faint)}
+  .pill{font-size:10px;font-weight:600;letter-spacing:.06em;color:var(--sageDeep);
+    background:rgba(122,154,126,.12);padding:3px 7px;border-radius:999px;white-space:nowrap}
+  .pill.gold{color:var(--gold);background:rgba(176,141,63,.11)}
+  .streak{font-size:12px;margin-top:3px;color:var(--soft)}
+  .warn .streak{color:var(--amberInk)}
+  .alarm .streak{color:var(--clay);font-weight:500}
+  .chev{background:none;padding:6px;display:grid;place-items:center;transition:transform 200ms ease}
+  .chev.open{transform:rotate(180deg)}
+
+  .floor{margin:14px 0 0 44px;padding-left:12px;border-left:2px solid var(--clay)}
+  .floorT{font-family:'Fraunces',Georgia,serif;font-size:15px;margin-bottom:4px}
+  .floorD{font-size:13px;color:var(--soft);line-height:1.55}
+  .floorD strong{color:var(--ink);font-weight:500}
+
+  .strip{display:flex;gap:3px;margin:14px 0 0 44px}
+  .bar{flex:1;height:20px;max-width:16px;border-radius:5px;cursor:pointer;transition:transform 160ms ease}
+  .bar:hover{transform:scale(1.28)}
+  .bar.today{box-shadow:inset 0 0 0 1.5px var(--sageDeep)}
+
+  .exp{margin-top:18px;padding-top:16px;border-top:1px solid var(--hair)}
+  .detail{margin-bottom:10px}
+  .dk{font-size:11px;color:var(--soft);margin-bottom:2px;letter-spacing:.03em}
+  .dv{font-size:14px;line-height:1.45}
+  .stats{display:flex;gap:24px;margin-bottom:12px}
+  .sl{font-size:11px;color:var(--soft);margin-bottom:2px}
+  .sv{font-family:'Fraunces',Georgia,serif;font-size:20px;color:var(--sageDeep)}
+  .next{font-size:12px;color:var(--soft);margin-bottom:14px}
+
+  .gridWrap{overflow-x:auto}
+  .gridIn{display:inline-block}
+  .months{display:flex;gap:3px;margin-bottom:6px;height:12px}
+  .mCol{width:12px;position:relative}
+  .mCol span{position:absolute;font-size:10px;color:var(--soft);white-space:nowrap}
+  .weeks{display:flex;gap:3px}
+  .wk{display:flex;flex-direction:column;gap:3px}
+  .cell{width:12px;height:12px;border-radius:3px;cursor:pointer;transition:transform 160ms ease}
+  .cell:hover{transform:scale(1.28)}
+  .cell.today{box-shadow:inset 0 0 0 1.2px var(--sageDeep)}
+  .cell.future{background:transparent!important;cursor:default}
+  .cell.future:hover{transform:none}
+
+  .empty{background:var(--card);border:1px solid var(--hair);border-radius:18px;
+    padding:44px 28px;text-align:center}
+  .btnP{background:var(--sage);color:#fff;padding:11px 24px;font-size:14px;font-weight:500}
+  .btnP:disabled{background:var(--faint);cursor:default}
+  .btnG{background:transparent;border:1px solid var(--faint);color:var(--soft);padding:10px 22px;font-size:14px}
+  .btnDash{background:transparent;border:1px dashed var(--faint);color:var(--soft);
+    border-radius:18px;padding:15px;font-size:14px;width:100%}
+  .link{background:none;color:var(--soft);font-size:13px;padding:6px 10px;flex-shrink:0}
+  .link.red{color:var(--clay)}
+
+  .editor{background:var(--card);border:1px solid var(--sage);border-radius:18px;padding:18px 16px}
+  .editor h3{font-family:'Fraunces',Georgia,serif;font-size:16px;font-weight:500;margin:0 0 16px}
+  .fld{margin-bottom:14px}
+  .lbl{font-size:11px;color:var(--soft);letter-spacing:.04em;margin-bottom:5px;display:block}
+  .opt{color:#BFB9B0}
+  .hint{font-size:11.5px;color:var(--soft);margin-top:6px;line-height:1.5}
+  .acts{display:flex;gap:8px;margin-top:20px}
+
+  .mCard{background:var(--card);border:1px solid var(--hair);border-radius:18px;padding:15px 16px}
+  .mCard.danger{border-color:var(--clay)}
+  .mTop{display:flex;align-items:flex-start;gap:10px}
+  .mMeta{font-size:12.5px;color:var(--soft);line-height:1.5}
+  .mWarn{font-size:12.5px;color:var(--amber);margin-top:4px}
+  .btnRed{background:var(--clay);color:#fff;padding:8px 16px;font-size:13px;font-weight:500}
+  .cap{font-size:12px;color:var(--soft);text-align:center;margin-top:6px;line-height:1.6}
+
+  .banner{border-radius:12px;padding:10px 14px;font-size:13px;margin-bottom:16px}
+  .banner.err{background:var(--clayBg);border:1px solid var(--clay);color:var(--clay)}
+  .banner.ok{background:rgba(122,154,126,.09);border:1px solid var(--sage);color:var(--sageDeep)}
+
+  .syncCard{background:var(--card);border:1px solid var(--hair);border-radius:18px;padding:15px 16px;margin-top:20px}
+  .syncHead{display:flex;justify-content:space-between;align-items:center;gap:10px}
+  .syncStat{font-size:13px;color:var(--soft)}
+  .divider{height:1px;background:var(--hair);margin:14px 0}
+  .syncTitle{font-size:11px;letter-spacing:.18em;color:var(--sageDeep);font-weight:600}
+
+  @keyframes fall{0%{transform:translateY(-12vh) rotate(0deg);opacity:1}
+    100%{transform:translateY(108vh) rotate(var(--spin));opacity:.85}}
+  @keyframes riseIn{0%{transform:translateY(14px) scale(.97);opacity:0}
+    100%{transform:translateY(0) scale(1);opacity:1}}
+  @keyframes breathe{0%{opacity:0}35%{opacity:1}100%{opacity:0}}
+  .confetti{position:fixed;top:0;pointer-events:none;z-index:60;
+    animation:fall var(--dur) cubic-bezier(.25,.6,.5,1) forwards}
+  .scrim{position:fixed;inset:0;z-index:70;display:grid;place-items:center;padding:20px;
+    background:rgba(61,59,55,.20);backdrop-filter:blur(2px)}
+  .sheet{background:var(--card);border-radius:22px;padding:34px 30px 26px;max-width:340px;width:100%;
+    text-align:center;border:1px solid var(--hair);box-shadow:0 16px 44px rgba(61,59,55,.14);
+    animation:riseIn 380ms cubic-bezier(.2,.8,.3,1) both}
+  .sheet.gold{border-color:rgba(176,141,63,.35);box-shadow:0 20px 60px rgba(176,141,63,.20)}
+  .sheetSub{font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--sageDeep);
+    font-weight:600;margin-bottom:12px}
+  .sheet.gold .sheetSub{color:var(--gold)}
+  .sheetT{font-family:'Fraunces',Georgia,serif;font-size:28px;font-weight:500;line-height:1.15;margin-bottom:10px}
+  .sheet.gold .sheetT{font-size:34px;color:var(--gold)}
+  .sheetP{font-size:14px;color:var(--soft);margin-bottom:24px;line-height:1.5}
+  .breath{position:fixed;inset:0;pointer-events:none;z-index:40;
+    background:radial-gradient(80% 50% at 50% 45%, rgba(122,154,126,.16), transparent 70%);
+    animation:breathe 1400ms ease forwards}
+
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none!important}
+    .confetti,.breath{display:none}
+    .sheet{animation:none}
+    .bar:hover,.cell:hover{transform:none}
+  }
+</style>
+</head>
+<body>
+<div id="glow"></div>
+<div id="app"></div>
+
+<script>
+"use strict";
+
+/* ═══════════════ CONSTANTS ═══════════════ */
+
+const LEV = ['#EDE9E2','#C5D6C7','#9DBFA2','#7A9A7E'];
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+// Ambient background. Nothing before day 14 — the room warms only once earned.
+const TIERS = [
+  {min:0,   bg:'#F7F4EF', tint:'transparent'},
+  {min:14,  bg:'#F5F5EF', tint:'rgba(122,154,126,0.05)'},
+  {min:30,  bg:'#F2F5EF', tint:'rgba(122,154,126,0.10)'},
+  {min:60,  bg:'#EFF5F0', tint:'rgba(122,154,126,0.16)'},
+  {min:100, bg:'#ECF4EE', tint:'rgba(176,141,63,0.10)'}
+];
+
+const STREAK_MARKS = [
+  {d:7,   label:'One week',    weight:1},
+  {d:14,  label:'Two weeks',   weight:1},
+  {d:21,  label:'Three weeks', weight:2},
+  {d:30,  label:'One month',   weight:3},
+  {d:60,  label:'Two months',  weight:3},
+  {d:90,  label:'Three months',weight:4},
+  {d:180, label:'Six months',  weight:4},
+  {d:365, label:'One year',    weight:5}
+];
+
+// Perfect days weigh one tier heavier — holding every habit is harder than holding one.
+const PERFECT_MARKS = [
+  {d:7,  label:'A clean week',    weight:2},
+  {d:14, label:'Two clean weeks', weight:3},
+  {d:30, label:'A clean month',   weight:4},
+  {d:90, label:'A clean quarter', weight:5}
+];
+
+const WEIGHT_COPY = {
+  1:'Held.',
+  2:'That\u2019s the hard part done.',
+  3:'This is a real streak now.',
+  4:'Very few people get here.',
+  5:'Summit.'
+};
+
+const CONFETTI_N = [0, 26, 55, 90, 140];
+
+/* ═══════════════ DATE HELPERS ═══════════════ */
+
+const keyFor = d =>
+  d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+const todayKey = () => keyFor(new Date());
+const parseKey = k => { const [y,m,d]=k.split('-').map(Number); return new Date(y,m-1,d); };
+const midnight = () => { const d=new Date(); d.setHours(0,0,0,0); return d; };
+
+function windowDays(n){
+  const out=[], d=midnight();
+  for(let i=n-1;i>=0;i--){ const x=new Date(d); x.setDate(d.getDate()-i); out.push(x); }
+  return out;
+}
+
+/* ═══════════════ STATE ═══════════════ */
+
+let data = { habits: [], seen: {}, updatedAt: 0 };
+try {
+  const raw = localStorage.getItem('bloupunt-data');
+  if (raw) {
+    const d = JSON.parse(raw);
+    data = { habits: d.habits||[], seen: d.seen||{}, updatedAt: d.updatedAt||0 };
+  }
+} catch(e){}
+
+let sync = { owner:'', repo:'', token:'', pass:'' };
+try {
+  const s = localStorage.getItem('bloupunt-sync');
+  if (s) sync = { ...sync, ...JSON.parse(s) };
+} catch(e){}
+
+let syncStatus = sync.token ? 'idle' : 'off';   // off | idle | syncing | ok | error
+let pushTimer = null;
+
+let screen    = 'today';    // today | manage
+let editing   = null;       // habit id | 'new' | null
+let confirm   = null;       // habit id | null
+let expanded  = null;       // habit id | null
+let form      = { name:'', cue:'', stack:'', minimum:'' };
+let celebration = null;     // {label, sub, weight}
+let flash     = false;
+let syncOpen  = false;
+let booted    = false;
+
+const save = () => {
+  data.updatedAt = Date.now();
+  try { localStorage.setItem('bloupunt-data', JSON.stringify(data)); } catch(e){}
+  if (syncReady()) { clearTimeout(pushTimer); pushTimer = setTimeout(pushRemote, 1500); }
+};
+
+/* ═══════════════ SYNC — encrypted blob in a private GitHub repo ═══════════════
+   The token cannot be hidden in a browser app; it is entered per device and lives
+   in localStorage. The blast radius is bounded instead: use a FINE-GRAINED PAT
+   scoped to the single private data repo with Contents:read+write and nothing else.
+   The payload itself is AES-GCM encrypted with a PBKDF2-derived key, so GitHub —
+   and anyone who obtains the file — sees ciphertext only.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const GH_URL = () =>
+  'https://api.github.com/repos/'+sync.owner.trim()+'/'+sync.repo.trim()+'/contents/bloupunt.json';
+const GH_HEADERS = () => ({
+  'Authorization':'Bearer '+sync.token.trim(),
+  'Accept':'application/vnd.github+json',
+  'X-GitHub-Api-Version':'2022-11-28'
+});
+
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64      = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const unb64    = s   => Uint8Array.from(atob(s), c=>c.charCodeAt(0));
+const b64utf8  = s   => btoa(unescape(encodeURIComponent(s)));
+const unb64utf8= s   => decodeURIComponent(escape(atob(s)));
+
+async function deriveKey(pass, salt){
+  const km = await crypto.subtle.importKey('raw', enc.encode(pass), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt, iterations:150000, hash:'SHA-256' },
+    km, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']
+  );
+}
+async function encryptData(obj, pass){
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv   = crypto.getRandomValues(new Uint8Array(12));
+  const key  = await deriveKey(pass, salt);
+  const ct   = await crypto.subtle.encrypt({name:'AES-GCM', iv}, key, enc.encode(JSON.stringify(obj)));
+  return { salt:b64(salt), iv:b64(iv), ct:b64(ct) };
+}
+async function decryptData(pkg, pass){
+  const key = await deriveKey(pass, unb64(pkg.salt));
+  const pt  = await crypto.subtle.decrypt({name:'AES-GCM', iv:unb64(pkg.iv)}, key, unb64(pkg.ct));
+  return JSON.parse(dec.decode(pt));
+}
+
+const syncReady = () => !!(sync.owner && sync.repo && sync.token && sync.pass);
+
+function syncLabel(){
+  return {
+    off:'Sync: off',
+    idle:'Sync: ready',
+    syncing:'Sync: syncing\u2026',
+    ok:'Sync: up to date \u2713',
+    error:'Sync: failed \u2014 check details / connection'
+  }[syncStatus];
+}
+function setSyncStatus(s){
+  syncStatus = s;
+  const el = document.getElementById('syncStat');
+  if (el) el.textContent = syncLabel();
+}
+
+async function ghGet(){
+  const res = await fetch(GH_URL(), { headers: GH_HEADERS(), cache:'no-store' });
+  if (res.status === 404) return { sha:null, body:null };
+  if (!res.ok) throw new Error('gh ' + res.status);
+  const j = await res.json();
+  return { sha:j.sha, body: JSON.parse(unb64utf8(j.content.replace(/\n/g,''))) };
+}
+
+async function pushRemote(){
+  if (!syncReady()) return;
+  setSyncStatus('syncing');
+  try {
+    const cur = await ghGet();
+    const pkg = await encryptData(data, sync.pass);
+    const payload = {
+      message: 'bloupunt sync ' + new Date().toISOString(),
+      content: b64utf8(JSON.stringify({ updatedAt: data.updatedAt, pkg }))
+    };
+    if (cur.sha) payload.sha = cur.sha;
+    const res = await fetch(GH_URL(), {
+      method:'PUT',
+      headers:{ ...GH_HEADERS(), 'Content-Type':'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) throw new Error('put ' + res.status);
+    setSyncStatus('ok');
+  } catch(e) {
+    setSyncStatus('error');
+  }
+}
+
+async function pullRemote(){
+  if (!syncReady()) return;
+  setSyncStatus('syncing');
+  try {
+    const cur = await ghGet();
+    if (!cur.body) { await pushRemote(); return; }        // first device seeds the repo
+    if (cur.body.pkg && cur.body.updatedAt > (data.updatedAt||0)) {
+      const obj = await decryptData(cur.body.pkg, sync.pass);
+      data = { habits: obj.habits||[], seen: obj.seen||{}, updatedAt: obj.updatedAt||0 };
+      try { localStorage.setItem('bloupunt-data', JSON.stringify(data)); } catch(e){}
+      render();
+    }
+    setSyncStatus('ok');
+  } catch(e) {
+    setSyncStatus('error');
+    render();
+  }
+}
+
+let lastPull = 0;
+function autoPull(){
+  if (!syncReady()) return;
+  const now = Date.now();
+  if (now - lastPull < 4000) return;
+  lastPull = now;
+  pullRemote();
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) autoPull(); });
+window.addEventListener('focus', autoPull);
+
+/* ═══════════════ STATS ═══════════════ */
+
+function statsFor(h){
+  const days = h.days || {};
+  const keys = Object.keys(days).sort();
+  if (!keys.length) return { streak:0, best:0, last30:0, missed:0 };
+
+  // consecutive missed days ending yesterday
+  let missed = 0;
+  const m = midnight();
+  m.setDate(m.getDate() - 1);
+  while (!days[keyFor(m)] && missed < 60) { missed++; m.setDate(m.getDate()-1); }
+
+  // current streak (today counts, but its absence doesn't break it until tomorrow)
+  let streak = 0;
+  const c = midnight();
+  if (!days[keyFor(c)]) c.setDate(c.getDate()-1);
+  while (days[keyFor(c)]) { streak++; c.setDate(c.getDate()-1); }
+
+  // best streak ever
+  let best=0, run=0, prev=null;
+  for (const k of keys){
+    const d = parseKey(k);
+    if (prev && (d - prev)/86400000 === 1) run++; else run = 1;
+    if (run > best) best = run;
+    prev = d;
+  }
+
+  let last30 = 0;
+  const c2 = midnight();
+  for (let i=0;i<30;i++){ if (days[keyFor(c2)]) last30++; c2.setDate(c2.getDate()-1); }
+
+  return { streak, best, last30, missed };
+}
+
+function perfectStreak(){
+  if (!data.habits.length) return 0;
+  const allDone = d => data.habits.every(h => h.days[keyFor(d)]);
+  let n = 0;
+  const c = midnight();
+  if (!allDone(c)) c.setDate(c.getDate()-1);
+  while (allDone(c) && n < 3650) { n++; c.setDate(c.getDate()-1); }
+  return n;
+}
+
+function shade(days, d){
+  if (!days[keyFor(d)]) return LEV[0];
+  const p1 = new Date(d); p1.setDate(d.getDate()-1);
+  const p2 = new Date(d); p2.setDate(d.getDate()-2);
+  const run = (days[keyFor(p1)]?1:0) + (days[keyFor(p2)]?1:0);
+  return LEV[1+run];
+}
+
+function currentTier(){
+  const best = Math.max(perfectStreak(), 0, ...data.habits.map(h => statsFor(h).streak));
+  let t = TIERS[0];
+  for (const x of TIERS) if (best >= x.min) t = x;
+  return t;
+}
+
+/* ═══════════════ MILESTONES ═══════════════ */
+
+function checkMilestones(){
+  if (!booted || !data.habits.length) return;
+  const hits = [];
+
+  const p = perfectStreak();
+  for (const m of PERFECT_MARKS){
+    const id = 'perfect:'+m.d;
+    if (p === m.d && !data.seen[id])
+      hits.push({ id, label:m.label, weight:m.weight, sub:'Every habit, '+m.d+' days straight' });
+  }
+
+  for (const h of data.habits){
+    const s = statsFor(h);
+    for (const m of STREAK_MARKS){
+      const id = 'streak:'+h.id+':'+m.d;
+      if (s.streak === m.d && !data.seen[id])
+        hits.push({ id, label:m.label, weight:m.weight, sub:h.name });
+    }
+  }
+
+  if (!hits.length) return;
+  hits.sort((a,b) => b.weight - a.weight);
+  hits.forEach(x => { data.seen[x.id] = true; });
+  save();
+  celebration = hits[0];
+}
+
+/* ═══════════════ ACTIONS ═══════════════ */
+
+window.toggle = (id, k) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const wasAll = data.habits.length > 0 && data.habits.every(x => x.days[todayKey()]);
+
+  if (h.days[k]) delete h.days[k]; else h.days[k] = 1;
+
+  const nowAll = data.habits.length > 0 && data.habits.every(x => x.days[todayKey()]);
+  if (k === todayKey() && nowAll && !wasAll && data.habits.length > 1){
+    flash = true;
+    setTimeout(() => { flash = false; render(); }, 1400);
+  }
+
+  save();
+  checkMilestones();
+  render();
+};
+
+window.setScreen = s => {
+  grab(); screen = s; editing = null; confirm = null; render();
+};
+
+window.toggleExpand = id => { expanded = (expanded === id) ? null : id; render(); };
+
+window.openNew = () => {
+  form = { name:'', cue:'', stack:'', minimum:'' };
+  editing = 'new'; confirm = null; screen = 'manage'; render();
+};
+
+window.openEdit = id => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  form = { name:h.name, cue:h.cue||'', stack:h.stack||'', minimum:h.minimum||'' };
+  editing = id; confirm = null; render();
+};
+
+window.cancelEdit = () => { editing = null; render(); };
+
+window.commit = () => {
+  grab();
+  const name = form.name.trim();
+  if (!name) return;
+  const payload = {
+    name,
+    cue:     form.cue.trim(),
+    stack:   form.stack.trim(),
+    minimum: form.minimum.trim()
+  };
+  if (editing === 'new'){
+    data.habits.push({ id: Date.now(), days:{}, ...payload });
+  } else {
+    const h = data.habits.find(x => x.id === editing);
+    if (h) Object.assign(h, payload);
+  }
+  save(); editing = null; render();
+};
+
+window.askRemove = id => { confirm = id; render(); };
+window.cancelRemove = () => { confirm = null; render(); };
+window.doRemove = id => {
+  data.habits = data.habits.filter(h => h.id !== id);
+  save(); confirm = null; expanded = null; render();
+};
+
+window.closeCelebration = () => { celebration = null; render(); };
+
+window.toggleSyncPanel = () => { syncOpen = !syncOpen; render(); };
+window.saveSync = () => {
+  const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  sync = { owner:v('inOwner'), repo:v('inRepo'), token:v('inToken'), pass:v('inPass') };
+  try { localStorage.setItem('bloupunt-sync', JSON.stringify(sync)); } catch(e){}
+  syncStatus = sync.token ? 'idle' : 'off';
+  syncOpen = false;
+  if (syncReady()) pullRemote(); else render();
+};
+window.syncNow = () => pullRemote();
+
+window.exportData = () => {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'bloupunt-' + todayKey() + '.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+// Keep in-progress form text across re-renders
+function grab(){
+  const g = id => { const el = document.getElementById(id); return el ? el.value : null; };
+  const map = { fName:'name', fCue:'cue', fStack:'stack', fMin:'minimum' };
+  for (const [id,key] of Object.entries(map)){
+    const v = g(id);
+    if (v !== null) form[key] = v;
+  }
+}
+
+/* ═══════════════ RENDER ═══════════════ */
+
+const esc = s => String(s ?? '')
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+const TICK_SVG = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none">'+
+  '<path d="M2.5 7.2L5.6 10.2L11.5 4" stroke="#fff" stroke-width="1.9" '+
+  'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const CHEV_SVG = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none">'+
+  '<path d="M2.5 4.5L6 8L9.5 4.5" stroke="#8A857D" stroke-width="1.4" '+
+  'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function chainStrip(h){
+  const today = todayKey();
+  return '<div class="strip">' + windowDays(21).map(d => {
+    const k = keyFor(d);
+    return '<div class="bar'+(k===today?' today':'')+'" role="button" tabindex="0" '+
+      'aria-label="'+k+(h.days[k]?', done':', not done')+'" '+
+      'style="background:'+shade(h.days,d)+'" '+
+      'onclick="toggle('+h.id+',\''+k+'\')" '+
+      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggle('+h.id+',\''+k+'\')}"></div>';
+  }).join('') + '</div>';
+}
+
+function fullGrid(h){
+  const end = midnight();
+  const dow = (end.getDay() + 6) % 7;              // 0 = Monday
+  const weekEnd = new Date(end);
+  weekEnd.setDate(end.getDate() + (6 - dow));
+
+  const weeks = [];
+  for (let w=17; w>=0; w--){
+    const col = [];
+    for (let r=0; r<7; r++){
+      const d = new Date(weekEnd);
+      d.setDate(weekEnd.getDate() - w*7 - (6 - r));
+      col.push(d);
+    }
+    weeks.push(col);
+  }
+
+  const now = new Date(), today = todayKey();
+
+  const months = weeks.map((w,i) => {
+    const show = i===0 || (weeks[i-1] && weeks[i-1][0].getMonth() !== w[0].getMonth());
+    return '<div class="mCol">'+(show?'<span>'+MONTHS[w[0].getMonth()]+'</span>':'')+'</div>';
+  }).join('');
+
+  const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
+    const future = d > now, k = keyFor(d);
+    const cls = 'cell'+(future?' future':'')+(k===today?' today':'');
+    return '<div class="'+cls+'" '+(future?'':'role="button" tabindex="0" ')+
+      'aria-label="'+k+(h.days[k]?', done':'')+'" '+
+      'style="background:'+shade(h.days,d)+'" '+
+      (future?'':'onclick="toggle('+h.id+',\''+k+'\')" '+
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggle('+h.id+',\''+k+'\')}"')+
+      '></div>';
+  }).join('') + '</div>').join('');
+
+  return '<div class="gridWrap"><div class="gridIn">'+
+    '<div class="months">'+months+'</div>'+
+    '<div class="weeks">'+cols+'</div>'+
+    '</div></div>';
+}
+
+function habitRow(h){
+  const today = todayKey();
+  const done  = !!h.days[today];
+  const s     = statsFor(h);
+  const open  = expanded === h.id;
+  const warn  = !done && s.missed === 1;
+  const alarm = !done && s.missed >= 2;
+
+  let mark = null;
+  for (const m of STREAK_MARKS) if (s.streak >= m.d) mark = m;
+
+  const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'');
+
+  const streakLine = alarm ? 'Missed '+s.missed+' in a row'
+    : warn ? 'Missed yesterday \u2014 don\u2019t miss twice'
+    : s.streak > 0 ? s.streak+' day'+(s.streak===1?'':'s')+' running'
+    : 'No streak yet';
+
+  const pill = (mark && mark.d >= 21)
+    ? '<span class="pill'+(mark.d>=90?' gold':'')+'">'+mark.d+'d</span>' : '';
+
+  const floorBlock = alarm ? (
+    '<div class="floor">'+
+      '<div class="floorT">Never miss twice.</div>'+
+      '<div class="floorD">'+ (h.minimum
+        ? 'Do the floor instead: <strong>'+esc(h.minimum)+'</strong>'
+        : 'Do the smallest version that still counts. Set a floor under <em>Manage</em> so it\u2019s decided before you need it.')+
+      '</div>'+
+    '</div>') : '';
+
+  let expBlock = '';
+  if (open){
+    const details = [
+      h.cue     ? '<div class="detail"><div class="dk">When and where</div><div class="dv">'+esc(h.cue)+'</div></div>' : '',
+      h.stack   ? '<div class="detail"><div class="dk">Straight after</div><div class="dv">'+esc(h.stack)+'</div></div>' : '',
+      h.minimum ? '<div class="detail"><div class="dk">The floor</div><div class="dv">'+esc(h.minimum)+'</div></div>' : ''
+    ].join('');
+
+    let nextLine = '';
+    const nx = STREAK_MARKS.find(m => m.d > s.streak);
+    if (nx && s.streak >= 3){
+      const away = nx.d - s.streak;
+      nextLine = '<div class="next">'+away+' day'+(away===1?'':'s')+' to '+nx.label.toLowerCase()+'</div>';
+    }
+
+    expBlock = '<div class="exp">'+ details +
+      '<div class="stats">'+
+        '<div><div class="sl">Streak</div><div class="sv">'+s.streak+'</div></div>'+
+        '<div><div class="sl">Best</div><div class="sv">'+s.best+'</div></div>'+
+        '<div><div class="sl">Last 30</div><div class="sv">'+s.last30+'/30</div></div>'+
+      '</div>'+ nextLine + fullGrid(h) + '</div>';
+  }
+
+  return '<div class="'+cls+'">'+
+    '<div class="top">'+
+      '<button class="tick'+(done?' on':'')+'" aria-pressed="'+done+'" '+
+        'aria-label="Mark '+esc(h.name)+' done for today" '+
+        'onclick="toggle('+h.id+',\''+today+'\')">'+(done?TICK_SVG:'')+'</button>'+
+      '<button class="nameBtn" onclick="toggle('+h.id+',\''+today+'\')">'+
+        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+pill+'</div>'+
+        '<div class="streak">'+streakLine+'</div>'+
+      '</button>'+
+      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
+        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+    '</div>'+
+    floorBlock + chainStrip(h) + expBlock +
+  '</div>';
+}
+
+function editorHTML(title){
+  return '<div class="editor">'+
+    '<h3>'+title+'</h3>'+
+    '<div class="fld">'+
+      '<label class="lbl" for="fName">The habit</label>'+
+      '<input id="fName" value="'+esc(form.name)+'" placeholder="Read" autofocus>'+
+    '</div>'+
+    '<div class="fld">'+
+      '<label class="lbl" for="fCue">When and where</label>'+
+      '<input id="fCue" value="'+esc(form.cue)+'" placeholder="At 9pm, in the bedroom">'+
+      '<p class="hint">A specific time and place. The single thing most likely to make it stick.</p>'+
+    '</div>'+
+    '<div class="fld">'+
+      '<label class="lbl" for="fStack">Straight after <span class="opt">\u00b7 optional</span></label>'+
+      '<input id="fStack" value="'+esc(form.stack)+'" placeholder="Putting the kettle on">'+
+      '<p class="hint">Anchor it to something you already do without thinking.</p>'+
+    '</div>'+
+    '<div class="fld">'+
+      '<label class="lbl" for="fMin">The floor</label>'+
+      '<input id="fMin" value="'+esc(form.minimum)+'" placeholder="One page">'+
+      '<p class="hint">The smallest version that still counts. Offered back after two missed days.</p>'+
+    '</div>'+
+    '<div class="acts">'+
+      '<button class="btnP" onclick="commit()">Save</button>'+
+      '<button class="btnG" onclick="cancelEdit()">Cancel</button>'+
+    '</div>'+
+  '</div>';
+}
+
+function syncPanel(){
+  const open = syncOpen ? (
+    '<div class="divider"></div>'+
+    '<div class="syncTitle">SYNC SETTINGS</div>'+
+    '<p class="hint">Set once per device, then leave it. Same four values everywhere. '+
+      'Use a fine-grained token scoped to the private data repo only. Your passphrase never leaves this device \u2014 '+
+      'lose it and the backup is unreadable.</p>'+
+    '<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">'+
+      '<input id="inOwner" value="'+esc(sync.owner)+'" placeholder="GitHub username">'+
+      '<input id="inRepo"  value="'+esc(sync.repo)+'"  placeholder="Private data repo (e.g. bloupunt-data)">'+
+      '<input id="inToken" value="'+esc(sync.token)+'" placeholder="Fine-grained access token">'+
+      '<input id="inPass"  value="'+esc(sync.pass)+'"  placeholder="Encryption passphrase">'+
+      '<button class="btnP" onclick="saveSync()">Save</button>'+
+      '<button class="btnG" onclick="syncNow()">Sync now</button>'+
+      '<button class="btnG" onclick="exportData()">Download a copy</button>'+
+    '</div>'
+  ) : '';
+
+  return '<div class="syncCard">'+
+    '<div class="syncHead">'+
+      '<div class="syncStat" id="syncStat">'+syncLabel()+'</div>'+
+      '<button class="btnG" style="padding:6px 12px;font-size:12px" onclick="toggleSyncPanel()">'+
+        (syncOpen?'Hide':'Manage sync')+'</button>'+
+    '</div>'+ open +
+  '</div>';
+}
+
+function celebrationHTML(){
+  if (!celebration) return '';
+  const { weight, label, sub } = celebration;
+  const gold = weight >= 4;
+  const n = CONFETTI_N[weight-1] || 0;
+  const palette = gold
+    ? ['#B08D3F','#D4B871','#7A9A7E','#EDE4CB','#C0836B']
+    : ['#7A9A7E','#9DBFA2','#C5D6C7','#C9A961','#DDD8D0'];
+
+  let bits = '';
+  for (let i=0;i<n;i++){
+    const w = 5 + Math.random()*6;
+    const round = Math.random() > 0.65;
+    bits += '<div class="confetti" aria-hidden="true" style="'+
+      'left:'+(Math.random()*100)+'%;'+
+      'width:'+w+'px;'+
+      'height:'+(round ? w : 8+Math.random()*9)+'px;'+
+      'background:'+palette[i % palette.length]+';'+
+      'border-radius:'+(round?'50%':'2px')+';'+
+      'animation-delay:'+(Math.random()*(gold?900:400))+'ms;'+
+      '--dur:'+(2400+Math.random()*2200)+'ms;'+
+      '--spin:'+(Math.random()*1080-540)+'deg;'+
+    '"></div>';
+  }
+
+  return bits +
+    '<div class="scrim" role="dialog" aria-live="polite" onclick="closeCelebration()">'+
+      '<div class="sheet'+(gold?' gold':'')+'" onclick="event.stopPropagation()">'+
+        '<div class="sheetSub">'+esc(sub)+'</div>'+
+        '<div class="sheetT">'+esc(label)+'</div>'+
+        '<p class="sheetP">'+WEIGHT_COPY[weight]+'</p>'+
+        '<button class="btnP" style="background:'+(gold?'var(--gold)':'var(--sage)')+'" '+
+          'onclick="closeCelebration()">Carry on</button>'+
+      '</div>'+
+    '</div>';
+}
+
+function render(){
+  const tier = currentTier();
+  document.documentElement.style.setProperty('--bg', tier.bg);
+  document.documentElement.style.setProperty('--tint', tier.tint);
+  const meta = document.querySelector('meta[name=theme-color]');
+  if (meta) meta.setAttribute('content', tier.bg);
+
+  const today = todayKey();
+  const doneCount = data.habits.filter(h => h.days[today]).length;
+  const allDone = data.habits.length > 0 && doneCount === data.habits.length;
+  const p = perfectStreak();
+
+  const subtitle = screen === 'today'
+    ? (data.habits.length === 0 ? 'Nothing set up yet'
+      : allDone ? (p >= 7 ? p+' clean days' : 'All marked off')
+      : doneCount+' of '+data.habits.length+' marked off')
+    : 'Set the cue, the anchor, and the floor';
+
+  let body;
+
+  if (screen === 'today'){
+    if (!data.habits.length){
+      body = '<div class="empty">'+
+        '<p class="serif" style="font-size:17px;margin-bottom:8px">Start with one or two.</p>'+
+        '<p style="font-size:13px;color:var(--soft);margin-bottom:22px;line-height:1.6">'+
+          'More than that and the chain breaks<br>before it has a chance to form.</p>'+
+        '<button class="btnP" onclick="openNew()">Add a habit</button>'+
+      '</div>';
+    } else {
+      body = '<div class="stack">'+
+        data.habits.map(habitRow).join('')+
+        (data.habits.length < 4
+          ? '<button class="btnDash" onclick="openNew()">+ Add a habit</button>' : '')+
+      '</div>';
+    }
+  } else {
+    const cards = data.habits.map(h => {
+      if (editing === h.id) return editorHTML('Edit habit');
+      if (confirm === h.id) return '<div class="mCard danger" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
+        '<span style="flex:1;font-size:13px;color:var(--soft);min-width:150px">Remove \u201c'+esc(h.name)+'\u201d and its history?</span>'+
+        '<button class="btnRed" onclick="doRemove('+h.id+')">Remove</button>'+
+        '<button class="btnG" style="padding:8px 16px;font-size:13px" onclick="cancelRemove()">Keep</button>'+
+      '</div>';
+      return '<div class="mCard"><div class="mTop">'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="font-size:16px;font-weight:500;margin-bottom:'+((h.cue||h.minimum)?'5px':'0')+'">'+esc(h.name)+'</div>'+
+          (h.cue     ? '<div class="mMeta">'+esc(h.cue)+'</div>' : '')+
+          (h.minimum ? '<div class="mMeta">Floor: '+esc(h.minimum)+'</div>' : '')+
+          (!h.cue    ? '<div class="mWarn">No cue set</div>' : '')+
+        '</div>'+
+        '<button class="link" onclick="openEdit('+h.id+')">Edit</button>'+
+        '<button class="link red" onclick="askRemove('+h.id+')">Remove</button>'+
+      '</div></div>';
+    }).join('');
+
+    const adder = editing === 'new'
+      ? editorHTML('New habit')
+      : '<button class="btnDash" onclick="openNew()">+ Add a habit</button>';
+
+    const cap = (data.habits.length >= 3 && !editing)
+      ? '<p class="cap">Three is plenty. Adding more is usually how the chain gets dropped.</p>' : '';
+
+    body = '<div class="stack">'+ cards + adder + cap +'</div>'+ syncPanel();
+  }
+
+  document.getElementById('app').innerHTML =
+    '<div class="head">'+
+      '<div>'+
+        '<div class="brand'+(tier.min>=100?' gold':'')+'">Bloupunt</div>'+
+        '<h1>'+(screen==='today'?'Today':'Your habits')+'</h1>'+
+        '<p class="sub">'+subtitle+'</p>'+
+      '</div>'+
+      '<button class="navBtn" onclick="setScreen(\''+(screen==='today'?'manage':'today')+'\')">'+
+        (screen==='today'?'Manage':'Done')+'</button>'+
+    '</div>'+
+    (syncStatus === 'error' && screen === 'today'
+      ? '<div class="banner err">Sync failed. Your data is safe on this device.</div>' : '')+
+    body +
+    (flash ? '<div class="breath" aria-hidden="true"></div>' : '')+
+    celebrationHTML();
+
+  const f = document.getElementById('fName');
+  if (f && !f.value) f.focus();
+}
+
+/* ═══════════════ BOOT ═══════════════ */
+
+render();
+booted = true;
+checkMilestones();
+if (celebration) render();
+if (syncReady()) pullRemote();
+
+// New day while the app sits open in the background — re-render so "today" is right.
+let lastDay = todayKey();
+setInterval(() => {
+  const t = todayKey();
+  if (t !== lastDay){ lastDay = t; render(); }
+}, 60000);
+</script>
+</body>
+</html>

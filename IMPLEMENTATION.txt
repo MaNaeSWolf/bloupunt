@@ -1,0 +1,318 @@
+BLOUPUNT — IMPLEMENTATION PLAN
+Habit tracker. Single-file HTML PWA, GitHub Pages hosted, encrypted sync
+to a private GitHub repo. Android home-screen install.
+
+Written to hand to Claude Code as project context.
+
+================================================================================
+0. WHAT THIS IS
+================================================================================
+
+A habit tracker built on the mechanics that actually drive adherence, not the
+ones that look good in a feature list.
+
+Core design decisions, and why (do not undo these without a reason):
+
+- MAX ~3 HABITS. The app nudges against a 4th. More habits = broken chain.
+- ONE-TAP LOGGING. The original failure mode was a paper tracker that was never
+  in the right place at wind-down. Everything else is secondary to: open app,
+  tap, done. No navigation, no drill-down, no modal.
+- ALL HABITS VISIBLE ON THE HOME SCREEN. Nothing hidden behind tabs.
+- BACKFILL IS ALLOWED. Any past day is tappable. Trackers die when you miss a
+  day of *logging* (not the habit) and the record goes stale. Let it be fixed.
+- STREAK COLOUR INTENSIFIES ON DAY 3+. A single isolated tick stays faint. The
+  visual reward is for the chain, not the tick.
+- NEVER MISS TWICE, ESCALATING:
+    * miss 1 day  -> row turns amber. Quiet. One miss is noise.
+    * miss 2+ days -> row turns clay, thicker border, and "the floor" surfaces
+      inline. Two misses is the start of a new (bad) habit.
+- REWARDS SCALE AND ARE EARNED. Marking everything today gets a 1.4s green
+  breath, no confetti. Confetti starts at a 7-day streak and escalates to a
+  9-second gold event at 365 days. Do not praise arriving.
+- BACKGROUND WARMS WITH THE STREAK. Paper-white until day 14, then shifts
+  toward green in 4 steps, gold past 100 days. Ambient. Barely noticeable
+  day-to-day, obvious in a screenshot from 3 months ago.
+
+Name: Bloupunt. The summit of the Cogmans Kloof trail race — reached by
+accumulating steps, not by any single one.
+
+================================================================================
+1. DATA MODEL
+================================================================================
+
+localStorage key: "bloupunt-data"
+
+{
+  "habits": [
+    {
+      "id": 1752192000000,       // Date.now() at creation. Stable primary key.
+      "name": "Read",            // required
+      "cue": "At 9pm, in the bedroom",   // implementation intention (when+where)
+      "stack": "Putting the kettle on",  // habit stacking anchor. optional.
+      "minimum": "One page",     // "the floor" — 2-minute version
+      "days": { "2026-07-11": 1, "2026-07-12": 1 }   // presence == done
+    }
+  ],
+  "seen": { "streak:1752192000000:7": true, "perfect:14": true },
+  "updatedAt": 1752192345678     // ms epoch. Used for last-write-wins sync.
+}
+
+localStorage key: "bloupunt-sync"
+
+{ "owner": "...", "repo": "...", "token": "...", "pass": "..." }
+
+Notes:
+- days uses date-string keys, NOT timestamps. Local-midnight semantics.
+  Never use toISOString() for the key — it's UTC and will shift days for
+  anyone east/west of UTC. Use the local keyFor() helper.
+- "seen" prevents a milestone firing twice. Never clear it.
+- Habit deletion is destructive and takes its history with it. Confirmed
+  inline (two-tap), not with a browser confirm().
+
+================================================================================
+2. STATS — EXACT SEMANTICS
+================================================================================
+
+streak(habit)
+  Consecutive days ending today. If today is not yet marked, the streak is
+  measured to yesterday and today is *grace* — an unmarked today does NOT
+  break the streak until tomorrow arrives. This matters: otherwise the app
+  reports "0 days running" every morning.
+
+missed(habit)
+  Consecutive UNMARKED days ending yesterday. Capped at 60 to bound the loop.
+  Drives the amber (missed==1) / clay (missed>=2) row states.
+
+best(habit)
+  Longest run ever. Computed by walking sorted keys and checking for a 1-day
+  delta.
+
+last30(habit)
+  Count of marked days in the trailing 30-day window.
+
+perfectStreak()
+  Consecutive days on which EVERY habit was marked. Same grace rule as streak.
+  Returns 0 if there are no habits.
+
+currentTier()
+  max(perfectStreak, all habit streaks) -> bucket into TIERS.
+  Drives --bg and --tint CSS custom properties.
+
+================================================================================
+3. MILESTONES
+================================================================================
+
+STREAK_MARKS (per habit)
+  7d   w1  "One week"
+  14d  w1  "Two weeks"
+  21d  w2  "Three weeks"      <- a "21d" pill appears next to the habit name
+  30d  w3  "One month"
+  60d  w3  "Two months"
+  90d  w4  "Three months"     <- gold. pill turns gold.
+  180d w4  "Six months"
+  365d w5  "One year"         <- 140 confetti pieces, ~9s
+
+PERFECT_MARKS (all habits, same day)
+  7d   w2  "A clean week"
+  14d  w3  "Two clean weeks"
+  30d  w4  "A clean month"
+  90d  w5  "A clean quarter"
+
+Perfect streaks weigh ONE TIER HEAVIER than the equivalent single-habit
+streak, because holding every habit is harder than holding one.
+
+Weight -> confetti count: [26, 55, 90, 140] for w2..w5. w1 = 26.
+Weight -> copy:
+  1 "Held."
+  2 "That's the hard part done."
+  3 "This is a real streak now."
+  4 "Very few people get here."
+  5 "Summit."
+
+Fire condition: streak === mark.d (exact equality, not >=) AND not in seen{}.
+Exact equality plus the seen{} guard is belt-and-braces: backfilling an old day
+can jump a streak past a threshold, and >= plus seen{} would still fire it.
+That's correct — the milestone was earned — but only once.
+
+If multiple milestones land at once, show the highest-weight one and mark all
+of them seen.
+
+================================================================================
+4. SYNC ARCHITECTURE — READ THIS BEFORE CHANGING IT
+================================================================================
+
+THE PROBLEM
+A browser app cannot hide a secret. Whatever the JS uses to authenticate must
+ship to the device and is readable via DevTools or view-source. Minifying,
+base64-ing, or fetching the token from a second file changes nothing. There is
+no client-side hiding place. GitHub Pages is static and cannot accept writes,
+so "just POST it to the server" is not available.
+
+THE APPROACH TAKEN
+Do not try to eliminate the exposure. BOUND THE BLAST RADIUS instead:
+
+  1. The token is NOT in the source. It is entered by hand, per device, and
+     lives in localStorage. Someone who views-source on the Pages URL gets
+     nothing.
+  2. The token is a FINE-GRAINED PAT scoped to ONE private data repo, with
+     Contents: read+write and nothing else. Worst case if it leaks: someone
+     corrupts a habit log. Not the account, not other repos.
+  3. The payload is AES-GCM encrypted (PBKDF2, 150k iterations, SHA-256,
+     random 16-byte salt + 12-byte IV per write). GitHub sees ciphertext.
+     Anyone who obtains the file sees ciphertext.
+  4. The page loads NO third-party JavaScript. Only a Google Fonts stylesheet.
+     Minimal XSS surface, which matters because localStorage is XSS-readable.
+
+Residual risk: XSS on this origin reads the token. Accepted, given (2).
+
+WIRE FORMAT (contents of bloupunt.json in the private repo)
+  { "updatedAt": 1752192345678,
+    "pkg": { "salt": "<b64>", "iv": "<b64>", "ct": "<b64>" } }
+
+updatedAt is deliberately OUTSIDE the ciphertext so a client can decide whether
+a pull is needed without first decrypting.
+
+CONFLICT RESOLUTION
+Last-write-wins on updatedAt. pullRemote() only overwrites local if
+remote.updatedAt > local.updatedAt. This SILENTLY LOSES DATA if two devices
+edit while one is offline. Acceptable for a single user with one phone. If
+that assumption ever breaks, this is the first thing to fix — and the fix is
+to merge the `days` maps (union of keys) rather than replace the object.
+
+WRITE CADENCE
+Debounced 1500ms after any mutation. Pull on visibilitychange + window focus,
+throttled to once per 4s.
+
+FAILURE MODE
+Sync failure is NON-BLOCKING and must stay that way. localStorage is the source
+of truth; the repo is a backup. A sync error shows a banner and nothing else
+breaks. The app must work fully offline, on a plane, with no token configured
+at all.
+
+THE PASSPHRASE IS NOT RECOVERABLE. Lose it and the backup is permanently
+unreadable. This is the point of AES-GCM, not a bug. Say so in the UI.
+
+IF TRUE MULTI-DEVICE SYNC IS EVER WANTED
+The correct architecture is a tiny backend that holds the token server-side —
+a Cloudflare Worker + KV is ~30 lines and free at this volume. The phone talks
+to the Worker; the Worker talks to GitHub. Do NOT put the token in the browser
+"more cleverly."
+
+================================================================================
+5. FILE STRUCTURE
+================================================================================
+
+Current state: one file. bloupunt.html — HTML + CSS + vanilla JS, no build
+step, no dependencies, no framework. Deliberate. It means the thing can be
+opened from a file:// URL in 10 years and still work.
+
+If Claude Code is asked to split it, the seams are:
+  - CSS custom properties block (the design tokens)
+  - date helpers (keyFor, todayKey, parseKey, midnight, windowDays)
+  - stats (statsFor, perfectStreak, shade, currentTier)
+  - crypto/sync (deriveKey, encryptData, decryptData, ghGet, push, pull)
+  - milestones (checkMilestones)
+  - render (habitRow, chainStrip, fullGrid, editorHTML, syncPanel, render)
+
+But: DO NOT ADD A BUILD STEP unless there's a concrete reason. The zero-
+dependency property is worth more than the tidiness.
+
+Render model: full innerHTML re-render on every state change. Fine at this
+scale (3 habits, ~130 DOM nodes). The one hazard is losing in-progress input
+text on re-render — handled by grab(), which reads live input values into the
+form object before any re-render. Any new input field MUST be added to grab()'s
+map or its text will vanish mid-typing.
+
+================================================================================
+6. DEPLOYMENT
+================================================================================
+
+Two repos. This separation is the whole security model — do not collapse them.
+
+  REPO A — bloupunt (PUBLIC)
+    Contains bloupunt.html (renamed index.html), and nothing sensitive.
+    Settings -> Pages -> Source: Deploy from branch -> main -> / (root)
+    Serves at https://<user>.github.io/bloupunt/
+
+  REPO B — bloupunt-data (PRIVATE)
+    Contains only bloupunt.json, written by the app.
+    Create it EMPTY. The first sync from the first device seeds it.
+    (pullRemote handles a 404 by pushing.)
+
+TOKEN
+  GitHub -> Settings -> Developer settings -> Personal access tokens ->
+  Fine-grained tokens -> Generate new token
+    Resource owner: your account
+    Repository access: Only select repositories -> bloupunt-data  ONLY
+    Permissions: Repository permissions -> Contents -> Read and write
+    (nothing else — no metadata beyond what's implied, no other repos)
+    Expiry: set a real one and diarise the rotation.
+
+FIRST RUN
+  Open the Pages URL -> Manage -> Manage sync -> enter owner / repo / token /
+  passphrase -> Save. It pulls (404) then pushes, seeding the repo.
+
+ANDROID HOME SCREEN
+  Open the Pages URL in Chrome -> ⋮ menu -> "Add to Home screen" / "Install app".
+  meta[name=mobile-web-app-capable] + apple-mobile-web-app-capable are set, so
+  it launches without browser chrome. theme-color is updated dynamically to
+  match the current tier background — the status bar warms with the streak.
+  The icon is an inline SVG data URI (a green ridgeline with a gold summit
+  point) so there are no external asset requests.
+
+OFFLINE
+  There is currently NO service worker. The app works offline once loaded, but
+  a cold launch with no network will fail to fetch the Google Fonts stylesheet
+  and fall back to system fonts (harmless), and — more importantly — a cold
+  launch with no network at all will not load the page from cache.
+  FIRST THING WORTH ADDING: a minimal service worker that cache-first serves
+  index.html. ~15 lines. Everything else already works offline.
+
+================================================================================
+7. BACKLOG — IN PRIORITY ORDER
+================================================================================
+
+1. SERVICE WORKER. Cache-first on index.html so a cold offline launch works.
+   This is the only real gap in the current build.
+
+2. SELF-HOST THE FONTS. Fraunces + Inter are currently pulled from Google.
+   That's the only external request the app makes. Inlining them as base64
+   woff2 makes the app fully self-contained and removes a privacy leak.
+   Cost: ~100KB. Worth it.
+
+3. TOKEN EXPIRY WARNING. The fine-grained PAT expires. When it does, sync
+   fails silently apart from a banner. Detect a 401 specifically and say
+   "token expired" rather than "sync failed".
+
+4. MERGE INSTEAD OF REPLACE ON PULL. Currently last-write-wins on the whole
+   object. Union the `days` maps instead — it's strictly better and removes
+   the only data-loss path. Do this if a second device ever appears.
+
+5. IMPORT. Export (download a copy) exists. There's no import. Add a file
+   picker that reads a bloupunt-*.json back into localStorage.
+
+NOT DOING — and why:
+  - Habit scorecard: a one-time audit exercise, not a recurring feature.
+  - Temptation bundling / environment design: real principles, but they happen
+    in the kitchen and the gym bag, not in an app. Nothing to log.
+  - Identity votes ("you cast 12 votes for being a reader"): the chain already
+    IS the evidence. Turning it into a counter reduces the best idea in the
+    book to a gimmick.
+  - Reminders/notifications: the cue field is the reminder. A push notification
+    trains you to respond to the phone, not to the cue.
+  - Streak freezes / cheat days: undermines the one rule that does the work.
+
+================================================================================
+8. THINGS THAT WILL BITE YOU
+================================================================================
+
+- toISOString() for date keys. UTC. Will silently shift days. Use keyFor().
+- Adding an input without adding it to grab(). Text vanishes on re-render.
+- Removing the today-grace from streak(). Every morning will read "0 days".
+- Using >= instead of === in checkMilestones() without the seen{} guard.
+  Fires the same milestone every single day.
+- Collapsing the two repos into one. The public repo is public. The token
+  is scoped to the private one. That's the entire security model.
+- Making sync blocking. It must never gate the tap-to-log path.
+- Adding a 4th, 5th, 6th habit slot because it's easy. The constraint IS the
+  feature.
