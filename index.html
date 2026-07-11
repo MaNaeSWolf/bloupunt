@@ -911,6 +911,14 @@ setInterval(() => {
   const t = todayKey();
   if (t !== lastDay){ lastDay = t; render(); }
 }, 60000);
+
+// Service worker — offline cold launch. Relative path so it scopes to /bloupunt/.
+// Registration failure is non-fatal: the app already works from localStorage.
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  });
+}
 </script>
 </body>
 </html>
