@@ -82,6 +82,20 @@
   .chev{background:none;padding:6px;display:grid;place-items:center;transition:transform 200ms ease}
   .chev.open{transform:rotate(180deg)}
 
+  .counter{display:flex;align-items:center;gap:5px;flex-shrink:0}
+  .step{width:30px;height:30px;flex-shrink:0;border-radius:50%;border:1.5px solid var(--faint);
+    background:var(--card);display:grid;place-items:center;font-size:19px;line-height:1;color:var(--soft);padding:0}
+  .step:active{transform:scale(.9)}
+  .step.plus{color:var(--sageDeep);border-color:#CBDCCD}
+  .step.minus{color:var(--clay);border-color:#E7C9BE}
+  .cnum{min-width:22px;text-align:center;font-family:'Fraunces',Georgia,serif;font-size:20px;color:var(--soft)}
+  .cnum.pos{color:var(--sageDeep)}
+  .cnum.neg{color:var(--clay)}
+  .seg{display:flex;gap:6px}
+  .segBtn{flex:1;background:var(--bg);border:1px solid var(--faint);color:var(--soft);
+    padding:9px 4px;font-size:13px;font-weight:500;border-radius:10px}
+  .segBtn.on{background:var(--sage);border-color:var(--sage);color:#fff}
+
   .floor{margin:14px 0 0 44px;padding-left:12px;border-left:2px solid var(--clay)}
   .floorT{font-family:'Fraunces',Georgia,serif;font-size:15px;margin-bottom:4px}
   .floorD{font-size:13px;color:var(--soft);line-height:1.55}
@@ -191,6 +205,8 @@
 /* ═══════════════ CONSTANTS ═══════════════ */
 
 const LEV = ['#EDE9E2','#C5D6C7','#9DBFA2','#7A9A7E'];
+// Counter gradient: clay (low / negative 7-day avg) -> paper -> sage (high / positive).
+const CTR_RED='#C0836B', CTR_MID='#EDE9E2', CTR_GRN='#7A9A7E';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // Ambient background. Nothing before day 14 — the room warms only once earned.
@@ -269,7 +285,7 @@ let screen    = 'today';    // today | manage
 let editing   = null;       // habit id | 'new' | null
 let confirm   = null;       // habit id | null
 let expanded  = null;       // habit id | null
-let form      = { name:'', cue:'', stack:'', minimum:'' };
+let form      = { name:'', cue:'', stack:'', minimum:'', type:'toggle' };
 let celebration = null;     // {label, sub, weight}
 let flash     = false;
 let syncOpen  = false;
@@ -442,6 +458,58 @@ window.addEventListener('focus', autoPull);
 
 /* ═══════════════ STATS ═══════════════ */
 
+const isCounter = h => h.type === 'plus' || h.type === 'minus' || h.type === 'plusminus';
+// "Logged" == a record exists for that day. Toggle stores 1; a counter may store
+// 0 or a negative net and still counts, because the goal is simply to log.
+const has = (days, k) => days[k] !== undefined;
+
+// Counter cell colour: clay -> paper -> sage, normalised across the habit's own
+// trailing-7-day-average range. Lowest week reads red, highest reads green.
+function lerpHex(a, b, t){
+  const A=parseInt(a.slice(1),16), B=parseInt(b.slice(1),16);
+  const r=Math.round((A>>16)+(((B>>16)-(A>>16))*t));
+  const g=Math.round(((A>>8)&255)+((((B>>8)&255)-((A>>8)&255))*t));
+  const bl=Math.round((A&255)+(((B&255)-(A&255))*t));
+  return 'rgb('+r+','+g+','+bl+')';
+}
+const diverge = t => {
+  t = Math.max(0, Math.min(1, t));
+  return t <= 0.5 ? lerpHex(CTR_RED, CTR_MID, t*2) : lerpHex(CTR_MID, CTR_GRN, (t-0.5)*2);
+};
+function counterScale(h){
+  // Trailing-7-day averages over the visible window, plus the min/max used to
+  // normalise them. Returns a colour(d) closure reused by the strip and grid.
+  const days = h.days || {};
+  const avg = {};
+  let min = Infinity, max = -Infinity;
+  // Colour from the earlier of habit creation or first logged day, so backfilled
+  // and imported days before creation still get tinted (not left blank).
+  let start = h.id ? new Date(h.id) : null;
+  if (start) start.setHours(0,0,0,0);
+  const keys = Object.keys(days);
+  if (keys.length){
+    const first = parseKey(keys.slice().sort()[0]);
+    if (!start || first < start) start = first;
+  }
+  const base = midnight();
+  for (let i=0;i<133;i++){
+    const day = new Date(base); day.setDate(base.getDate()-i);
+    if (start && day < start) continue;
+    let sum=0;
+    for (let j=0;j<7;j++){ const x=new Date(day); x.setDate(day.getDate()-j); sum += (days[keyFor(x)]||0); }
+    const a = sum/7;
+    avg[keyFor(day)] = a;
+    if (a<min) min=a; if (a>max) max=a;
+  }
+  const range = max - min;
+  return d => {
+    const k = keyFor(d);
+    if (start && d < start) return LEV[0];
+    if (!(k in avg)) return LEV[0];
+    return diverge(range < 1e-9 ? 0.72 : (avg[k]-min)/range);
+  };
+}
+
 function statsFor(h){
   const days = h.days || {};
   const keys = Object.keys(days).sort();
@@ -476,8 +544,9 @@ function statsFor(h){
 }
 
 function perfectStreak(){
-  if (!data.habits.length) return 0;
-  const allDone = d => data.habits.every(h => h.days[keyFor(d)]);
+  const list = data.habits.filter(h => !isCounter(h));   // counters aren't part of the chain
+  if (!list.length) return 0;
+  const allDone = d => list.every(h => h.days[keyFor(d)]);
   let n = 0;
   const c = midnight();
   if (!allDone(c)) c.setDate(c.getDate()-1);
@@ -494,7 +563,8 @@ function shade(days, d){
 }
 
 function currentTier(){
-  const best = Math.max(perfectStreak(), 0, ...data.habits.map(h => statsFor(h).streak));
+  const streaks = data.habits.filter(h => !isCounter(h)).map(h => statsFor(h).streak);
+  const best = Math.max(perfectStreak(), 0, ...streaks);
   let t = TIERS[0];
   for (const x of TIERS) if (best >= x.min) t = x;
   return t;
@@ -514,6 +584,7 @@ function checkMilestones(){
   }
 
   for (const h of data.habits){
+    if (isCounter(h)) continue;                          // counters have no streak milestones
     const s = statsFor(h);
     for (const m of STREAK_MARKS){
       const id = 'streak:'+h.id+':'+m.d;
@@ -534,12 +605,13 @@ function checkMilestones(){
 window.toggle = (id, k) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  const wasAll = data.habits.length > 0 && data.habits.every(x => x.days[todayKey()]);
+  const chain = data.habits.filter(x => !isCounter(x));
+  const wasAll = chain.length > 0 && chain.every(x => x.days[todayKey()]);
 
   if (h.days[k]) delete h.days[k]; else h.days[k] = 1;
 
-  const nowAll = data.habits.length > 0 && data.habits.every(x => x.days[todayKey()]);
-  if (k === todayKey() && nowAll && !wasAll && data.habits.length > 1){
+  const nowAll = chain.length > 0 && chain.every(x => x.days[todayKey()]);
+  if (k === todayKey() && nowAll && !wasAll && chain.length > 1){
     flash = true;
     setTimeout(() => { flash = false; render(); }, 1400);
   }
@@ -555,15 +627,27 @@ window.setScreen = s => {
 
 window.toggleExpand = id => { expanded = (expanded === id) ? null : id; render(); };
 
+// Counter logging. Net value persists even at 0 - the goal is to log, so a day
+// with any interaction counts as logged. No milestones/flash: counters are trackers.
+window.bump = (id, k, delta) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  h.days[k] = (h.days[k] || 0) + delta;
+  save();
+  render();
+};
+
+window.setFormType = t => { grab(); form.type = t; render(); };
+
 window.openNew = () => {
-  form = { name:'', cue:'', stack:'', minimum:'' };
+  form = { name:'', cue:'', stack:'', minimum:'', type:'toggle' };
   editing = 'new'; confirm = null; screen = 'manage'; render();
 };
 
 window.openEdit = id => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  form = { name:h.name, cue:h.cue||'', stack:h.stack||'', minimum:h.minimum||'' };
+  form = { name:h.name, cue:h.cue||'', stack:h.stack||'', minimum:h.minimum||'', type:h.type||'toggle' };
   editing = id; confirm = null; render();
 };
 
@@ -577,7 +661,8 @@ window.commit = () => {
     name,
     cue:     form.cue.trim(),
     stack:   form.stack.trim(),
-    minimum: form.minimum.trim()
+    minimum: form.minimum.trim(),
+    type:    form.type || 'toggle'
   };
   if (editing === 'new'){
     data.habits.push({ id: Date.now(), days:{}, ...payload });
@@ -673,13 +758,17 @@ const CHEV_SVG = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none">'+
 
 function chainStrip(h){
   const today = todayKey();
+  const counter = isCounter(h), col = counter ? counterScale(h) : null, prim = h.type==='minus' ? -1 : 1;
   return '<div class="strip">' + windowDays(21).map(d => {
     const k = keyFor(d);
+    const bg  = counter ? col(d) : shade(h.days,d);
+    const act = counter ? ('bump('+h.id+',\''+k+'\','+prim+')') : ('toggle('+h.id+',\''+k+'\')');
+    const lab = counter ? (k+', '+(h.days[k]||0)) : (k+(h.days[k]?', done':', not done'));
     return '<div class="bar'+(k===today?' today':'')+'" role="button" tabindex="0" '+
-      'aria-label="'+k+(h.days[k]?', done':', not done')+'" '+
-      'style="background:'+shade(h.days,d)+'" '+
-      'onclick="toggle('+h.id+',\''+k+'\')" '+
-      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggle('+h.id+',\''+k+'\')}"></div>';
+      'aria-label="'+lab+'" '+
+      'style="background:'+bg+'" '+
+      'onclick="'+act+'" '+
+      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}"></div>';
   }).join('') + '</div>';
 }
 
@@ -701,6 +790,7 @@ function fullGrid(h){
   }
 
   const now = new Date(), today = todayKey();
+  const counter = isCounter(h), col = counter ? counterScale(h) : null, prim = h.type==='minus' ? -1 : 1;
 
   const months = weeks.map((w,i) => {
     const show = i===0 || (weeks[i-1] && weeks[i-1][0].getMonth() !== w[0].getMonth());
@@ -710,11 +800,14 @@ function fullGrid(h){
   const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
     const future = d > now, k = keyFor(d);
     const cls = 'cell'+(future?' future':'')+(k===today?' today':'');
+    const bg  = counter ? col(d) : shade(h.days,d);
+    const act = counter ? ('bump('+h.id+',\''+k+'\','+prim+')') : ('toggle('+h.id+',\''+k+'\')');
+    const lab = counter ? (k+', '+(h.days[k]||0)) : (k+(h.days[k]?', done':''));
     return '<div class="'+cls+'" '+(future?'':'role="button" tabindex="0" ')+
-      'aria-label="'+k+(h.days[k]?', done':'')+'" '+
-      'style="background:'+shade(h.days,d)+'" '+
-      (future?'':'onclick="toggle('+h.id+',\''+k+'\')" '+
-        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();toggle('+h.id+',\''+k+'\')}"')+
+      'aria-label="'+lab+'" '+
+      'style="background:'+bg+'" '+
+      (future?'':'onclick="'+act+'" '+
+        'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}"')+
       '></div>';
   }).join('') + '</div>').join('');
 
@@ -724,8 +817,61 @@ function fullGrid(h){
     '</div></div>';
 }
 
+function counterControls(h, today){
+  const v = h.days[today] || 0;
+  const cls = v>0?' pos':v<0?' neg':'';
+  const num = '<span class="cnum'+cls+'">'+v+'</span>';
+  const minus = '<button class="step minus" aria-label="Subtract one from '+esc(h.name)+'" '+
+    'onclick="bump('+h.id+',\''+today+'\',-1)">−</button>';
+  const plus  = '<button class="step plus" aria-label="Add one to '+esc(h.name)+'" '+
+    'onclick="bump('+h.id+',\''+today+'\',1)">+</button>';
+  const inner = h.type==='plus' ? num+plus : h.type==='minus' ? minus+num : minus+num+plus;
+  return '<div class="counter">'+inner+'</div>';
+}
+
+function counterRow(h, today){
+  const open = expanded === h.id;
+  const v = h.days[today] || 0;
+  const loggedToday = has(h.days, today);
+
+  let sum=0; const c=midnight();
+  for (let i=0;i<7;i++){ const x=new Date(c); x.setDate(c.getDate()-i); sum += (h.days[keyFor(x)]||0); }
+  const avg = Math.round((sum/7)*10)/10;
+  const sub = (loggedToday ? 'Today '+v : 'Not logged today') + ' · 7-day avg '+avg;
+
+  let expBlock='';
+  if (open){
+    const details = [
+      h.cue   ? '<div class="detail"><div class="dk">When and where</div><div class="dv">'+esc(h.cue)+'</div></div>' : '',
+      h.stack ? '<div class="detail"><div class="dk">Straight after</div><div class="dv">'+esc(h.stack)+'</div></div>' : ''
+    ].join('');
+    let tot=0, logged=0; const c2=midnight();
+    for (let i=0;i<30;i++){ const k=keyFor(c2); if (k in h.days){ tot+=h.days[k]; logged++; } c2.setDate(c2.getDate()-1); }
+    expBlock = '<div class="exp">'+ details +
+      '<div class="stats">'+
+        '<div><div class="sl">7-day avg</div><div class="sv">'+avg+'</div></div>'+
+        '<div><div class="sl">30-day total</div><div class="sv">'+tot+'</div></div>'+
+        '<div><div class="sl">Days logged</div><div class="sv">'+logged+'/30</div></div>'+
+      '</div>'+ fullGrid(h) + '</div>';
+  }
+
+  return '<div class="row'+(loggedToday?' done':'')+'">'+
+    '<div class="top">'+
+      counterControls(h, today)+
+      '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
+        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span></div>'+
+        '<div class="streak">'+sub+'</div>'+
+      '</button>'+
+      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
+        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+    '</div>'+
+    chainStrip(h) + expBlock +
+  '</div>';
+}
+
 function habitRow(h){
   const today = todayKey();
+  if (isCounter(h)) return counterRow(h, today);
   const done  = !!h.days[today];
   const s     = statsFor(h);
   const open  = expanded === h.id;
@@ -793,12 +939,34 @@ function habitRow(h){
   '</div>';
 }
 
+const segBtn = (t, label) =>
+  '<button type="button" class="segBtn'+((form.type||'toggle')===t?' on':'')+'" '+
+    'onclick="setFormType(\''+t+'\')">'+label+'</button>';
+
+function typeHint(t){
+  return t==='plus' ? 'Tap + each time (e.g. a glass of water). Cells are tinted by your 7-day average.'
+    : t==='minus' ? 'Tap − each time (e.g. a slip you want to avoid). Cells are tinted by your 7-day average.'
+    : t==='plusminus' ? 'Both buttons: + for a win, − for a slip. The day is the running total, tinted by your 7-day average.'
+    : 'A simple daily tick. Builds streaks, milestones and the warming background.';
+}
+
+const typeLabel = t => t==='plus' ? 'Counter · +'
+  : t==='minus' ? 'Counter · −'
+  : t==='plusminus' ? 'Counter · +/−' : 'Tick';
+
 function editorHTML(title){
   return '<div class="editor">'+
     '<h3>'+title+'</h3>'+
     '<div class="fld">'+
       '<label class="lbl" for="fName">The habit</label>'+
       '<input id="fName" value="'+esc(form.name)+'" placeholder="Read" autofocus>'+
+    '</div>'+
+    '<div class="fld">'+
+      '<label class="lbl">How you log it</label>'+
+      '<div class="seg">'+
+        segBtn('toggle','Tick')+ segBtn('plus','+')+ segBtn('minus','−')+ segBtn('plusminus','+/−')+
+      '</div>'+
+      '<p class="hint">'+typeHint(form.type)+'</p>'+
     '</div>'+
     '<div class="fld">'+
       '<label class="lbl" for="fCue">When and where</label>'+
@@ -895,14 +1063,16 @@ function render(){
   if (meta) meta.setAttribute('content', tier.bg);
 
   const today = todayKey();
-  const doneCount = data.habits.filter(h => h.days[today]).length;
-  const allDone = data.habits.length > 0 && doneCount === data.habits.length;
+  const chain = data.habits.filter(h => !isCounter(h));   // counters are trackers, not chain habits
+  const doneCount = chain.filter(h => h.days[today]).length;
+  const allDone = chain.length > 0 && doneCount === chain.length;
   const p = perfectStreak();
 
   const subtitle = screen === 'today'
     ? (data.habits.length === 0 ? 'Nothing set up yet'
+      : chain.length === 0 ? 'Tracking ' + data.habits.length + (data.habits.length===1?' thing':' things')
       : allDone ? (p >= 7 ? p+' clean days' : 'All marked off')
-      : doneCount+' of '+data.habits.length+' marked off')
+      : doneCount+' of '+chain.length+' marked off')
     : 'Set the cue, the anchor, and the floor';
 
   let body;
@@ -918,7 +1088,7 @@ function render(){
     } else {
       body = '<div class="stack">'+
         data.habits.map(habitRow).join('')+
-        (data.habits.length < 4
+        (chain.length < 4
           ? '<button class="btnDash" onclick="openNew()">+ Add a habit</button>' : '')+
       '</div>';
     }
@@ -935,6 +1105,7 @@ function render(){
           '<div style="font-size:16px;font-weight:500;margin-bottom:'+((h.cue||h.minimum)?'5px':'0')+'">'+esc(h.name)+'</div>'+
           (h.cue     ? '<div class="mMeta">'+esc(h.cue)+'</div>' : '')+
           (h.minimum ? '<div class="mMeta">Floor: '+esc(h.minimum)+'</div>' : '')+
+          (isCounter(h) ? '<div class="mMeta">'+typeLabel(h.type)+'</div>' : '')+
           (!h.cue    ? '<div class="mWarn">No cue set</div>' : '')+
         '</div>'+
         '<button class="link" onclick="openEdit('+h.id+')">Edit</button>'+
