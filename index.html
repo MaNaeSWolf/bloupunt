@@ -113,6 +113,11 @@
   .chipBtn.clear{color:var(--clay)}
   .chipNum{min-width:22px;text-align:center;font-family:'Fraunces',Georgia,serif;font-size:18px;color:var(--ink)}
   .chipX{background:none;color:var(--soft);font-size:18px;padding:2px 6px;margin-left:auto}
+  .ord{display:flex;flex-direction:column;gap:3px;flex-shrink:0;margin-right:2px}
+  .ordBtn{width:26px;height:20px;border-radius:6px;border:1px solid var(--faint);
+    background:var(--bg);color:var(--soft);font-size:12px;line-height:1;display:grid;place-items:center;padding:0}
+  .ordBtn:hover:not(:disabled){border-color:var(--sage);color:var(--sageDeep)}
+  .ordBtn:disabled{opacity:.3;cursor:default}
 
   .floor{margin:14px 0 0 44px;padding-left:12px;border-left:2px solid var(--clay)}
   .floorT{font-family:'Fraunces',Georgia,serif;font-size:15px;margin-bottom:4px}
@@ -224,6 +229,10 @@
 const LEV = ['#EDE9E2','#C5D6C7','#9DBFA2','#7A9A7E'];
 // Counter gradient: clay (low / negative 7-day avg) -> paper -> sage (high / positive).
 const CTR_RED='#C0836B', CTR_MID='#EDE9E2', CTR_GRN='#7A9A7E';
+// A genuinely missed day - after the habit started, before today, unlogged and not
+// paused. Deliberately a darker neutral grey so it reads apart from both the
+// gradient and an untouched day (before the habit existed, paused, or still today).
+const MISSED = '#C8C2B8';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // Ambient background. Nothing before day 14 — the room warms only once earned.
@@ -527,37 +536,68 @@ const diverge = t => {
   t = Math.max(0, Math.min(1, t));
   return t <= 0.5 ? lerpHex(CTR_RED, CTR_MID, t*2) : lerpHex(CTR_MID, CTR_GRN, (t-0.5)*2);
 };
-function counterScale(h){
-  // Trailing-7-day averages over the visible window, plus the min/max used to
-  // normalise them. Returns a colour(d) closure reused by the strip and grid.
-  const days = h.days || {};
-  const avg = {};
-  let min = Infinity, max = -Infinity;
-  // Colour from the earlier of habit creation or first logged day, so backfilled
-  // and imported days before creation still get tinted (not left blank).
+// The day a habit's history begins: the earlier of its creation and its first
+// logged day, so backfilled/imported history still counts as "it existed then".
+function habitStart(h){
   let start = h.id ? new Date(h.id) : null;
   if (start) start.setHours(0,0,0,0);
-  const keys = Object.keys(days);
+  const keys = Object.keys(h.days || {});
   if (keys.length){
     const first = parseKey(keys.slice().sort()[0]);
     if (!start || first < start) start = first;
   }
+  return start;
+}
+
+// Trailing 7-day mean of a counter's values. Paused days are skipped entirely
+// (not counted as zeros) so a break never drags the average down.
+function avg7(h, d){
+  const days = h.days || {}, paused = data.paused || {};
+  let sum = 0, n = 0;
+  for (let j=0;j<7;j++){
+    const x = new Date(d); x.setDate(d.getDate()-j);
+    const k = keyFor(x);
+    if (paused[k]) continue;
+    sum += (days[k] || 0); n++;
+  }
+  return n ? sum/n : 0;
+}
+
+// Colour for a day with no record: missed grey only if the habit was actually
+// running that day. Before it existed, while paused, or today (still in grace) all
+// stay the neutral untouched tone.
+function unloggedShade(h, d){
+  const k = keyFor(d);
+  if ((data.paused || {})[k]) return LEV[0];
+  const start = habitStart(h);
+  if (start && d < start) return LEV[0];
+  if (d >= midnight()) return LEV[0];
+  return MISSED;
+}
+
+function counterScale(h){
+  // Normalised trailing-7-day averages, used to tint LOGGED days only. Unlogged
+  // days never get a gradient tone - that's what made a mid average look untouched.
+  const days = h.days || {};
+  const avg = {};
+  let min = Infinity, max = -Infinity;
+  const start = habitStart(h);
   const base = midnight();
   for (let i=0;i<133;i++){
     const day = new Date(base); day.setDate(base.getDate()-i);
     if (start && day < start) continue;
-    let sum=0;
-    for (let j=0;j<7;j++){ const x=new Date(day); x.setDate(day.getDate()-j); sum += (days[keyFor(x)]||0); }
-    const a = sum/7;
-    avg[keyFor(day)] = a;
+    const k = keyFor(day);
+    if (!has(days, k)) continue;               // only logged days define the scale
+    const a = avg7(h, day);
+    avg[k] = a;
     if (a<min) min=a; if (a>max) max=a;
   }
   const range = max - min;
   return d => {
     const k = keyFor(d);
-    if (start && d < start) return LEV[0];
-    if (!(k in avg)) return LEV[0];
-    return diverge(range < 1e-9 ? 0.72 : (avg[k]-min)/range);
+    if (!has(days, k)) return unloggedShade(h, d);
+    const a = (k in avg) ? avg[k] : avg7(h, d);
+    return diverge(range < 1e-9 ? 0.72 : (a-min)/range);
   };
 }
 
@@ -632,11 +672,12 @@ function perfectStreak(){
   return n;
 }
 
-function shade(days, d){
-  if (!days[keyFor(d)]) return LEV[0];
+function shade(h, d){
+  const days = h.days || {};
+  if (!has(days, keyFor(d))) return unloggedShade(h, d);
   const p1 = new Date(d); p1.setDate(d.getDate()-1);
   const p2 = new Date(d); p2.setDate(d.getDate()-2);
-  const run = (days[keyFor(p1)]?1:0) + (days[keyFor(p2)]?1:0);
+  const run = (has(days,keyFor(p1))?1:0) + (has(days,keyFor(p2))?1:0);
   return LEV[1+run];
 }
 
@@ -800,6 +841,17 @@ window.commit = () => {
   save(); editing = null; render();
 };
 
+// Reorder habits in Manage. Order is just the array order, which the sync union
+// preserves (local order first, remote-only habits appended).
+window.moveHabit = (id, dir) => {
+  const i = data.habits.findIndex(h => h.id === id);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= data.habits.length) return;
+  const [h] = data.habits.splice(i, 1);
+  data.habits.splice(j, 0, h);
+  save(); render();
+};
+
 window.askRemove = id => { confirm = id; render(); };
 window.cancelRemove = () => { confirm = null; render(); };
 window.doRemove = id => {
@@ -888,7 +940,7 @@ function chainStrip(h){
   const counter = isCounter(h), col = counter ? counterScale(h) : null;
   return '<div class="strip">' + windowDays(21).map(d => {
     const k = keyFor(d);
-    const bg  = counter ? col(d) : shade(h.days,d);
+    const bg  = counter ? col(d) : shade(h,d);
     // Tapping a day opens the edit chip - never an instant change - so backfill is deliberate.
     const act = 'openDay('+h.id+',\''+k+'\')';
     const lab = 'Edit '+k+(counter ? (', '+(h.days[k]||0)) : (h.days[k]?', done':', not done'));
@@ -932,7 +984,7 @@ function fullGrid(h){
   const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
     const future = d > now, k = keyFor(d);
     const cls = 'cell'+(future?' future':'')+(k===today?' today':'')+((data.paused && data.paused[k] && !has(h.days,k))?' paused':'');
-    const bg  = counter ? col(d) : shade(h.days,d);
+    const bg  = counter ? col(d) : shade(h,d);
     return '<div class="'+cls+'" style="background:'+bg+'"></div>';
   }).join('') + '</div>').join('');
 
@@ -999,9 +1051,7 @@ function counterRow(h, today){
     : s.streak > 0 ? s.streak+' day'+(s.streak===1?'':'s')+' logged'
     : 'Not logged yet';
 
-  let sum=0; const c=midnight();
-  for (let i=0;i<7;i++){ const x=new Date(c); x.setDate(c.getDate()-i); sum += (h.days[keyFor(x)]||0); }
-  const avg = Math.round((sum/7)*10)/10;
+  const avg = Math.round(avg7(h, midnight())*10)/10;   // paused days excluded
 
   let expBlock='';
   if (open){
@@ -1299,7 +1349,16 @@ function render(){
         '<button class="btnRed" onclick="doRemove('+h.id+')">Remove</button>'+
         '<button class="btnG" style="padding:8px 16px;font-size:13px" onclick="cancelRemove()">Keep</button>'+
       '</div>';
+      const i = data.habits.indexOf(h), last = data.habits.length - 1;
+      const reorder = data.habits.length > 1
+        ? '<div class="ord">'+
+            '<button class="ordBtn" aria-label="Move '+esc(h.name)+' up" '+(i===0?'disabled':'')+
+              ' onclick="moveHabit('+h.id+',-1)">↑</button>'+
+            '<button class="ordBtn" aria-label="Move '+esc(h.name)+' down" '+(i===last?'disabled':'')+
+              ' onclick="moveHabit('+h.id+',1)">↓</button>'+
+          '</div>' : '';
       return '<div class="mCard"><div class="mTop">'+
+        reorder +
         '<div style="flex:1;min-width:0">'+
           '<div style="font-size:16px;font-weight:500;margin-bottom:'+((h.cue||h.minimum)?'5px':'0')+'">'+esc(h.name)+'</div>'+
           (h.cue     ? '<div class="mMeta">'+esc(h.cue)+'</div>' : '')+

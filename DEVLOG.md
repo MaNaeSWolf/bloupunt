@@ -120,12 +120,26 @@ the form object before any re-render. *Any new input field must be added to
 - `currentTier` — `max(perfectStreak, all habit streaks)` → bucket → the `--bg` /
   `--tint` background warmth and the status-bar `theme-color`.
 
-**Counter colour.** Counter cells (the 21-day strip and the full grid) are tinted on
-a **clay → paper → sage** diverging gradient by that day's **trailing 7-day
-average**, normalised to the habit's own min/max over the visible window: the worst
-week reads red, the best reads green. For a `−` habit that means clean weeks trend
-green and heavy-slip weeks go clay. Tinting starts from the earlier of the habit's
-creation or its first logged day, so backfilled/imported history is coloured too.
+**Day colours.** Every cell falls into exactly one of four states:
+
+| state | colour | meaning |
+|-------|--------|---------|
+| logged (toggle) | sage, deepening on day 3+ of a run | the chain |
+| logged (counter) | clay → paper → sage gradient | trailing 7-day average, normalised to the habit's own min/max — worst week red, best week green |
+| **missed** | darker grey `#C8C2B8` | habit was running, day is past, unlogged, not paused |
+| untouched | paper `#EDE9E2` | before the habit existed, paused, or today (still in grace) |
+
+Only **logged** days get a gradient tone — that is what keeps a mid-range average
+from looking identical to an unmarked day. `habitStart()` is the earlier of the
+habit's creation and its first logged day, so backfilled/imported history counts as
+"it existed then." `avg7()` **skips paused days entirely** rather than counting them
+as zeros, so a break never drags the average down.
+
+**Editing days.** The multi-month grid is **view-only**. Editing happens only via the
+day-edit chip, opened by tapping a cell in the 21-day strip — so backfill is capped
+at the visible ~3 weeks and is always deliberate and undoable. Today's tick and the
+row `+/−` remain one-tap. A habit's whole history can be wiped from its editor
+("Clear all logged days", confirm-guarded).
 
 **Milestones** (`checkMilestones`). Per-habit `STREAK_MARKS` (7d…365d) and
 all-habit `PERFECT_MARKS` (7d…90d), including counters. Fire on `streak === mark.d`
@@ -146,6 +160,10 @@ marked seen. Weight → confetti count `[26,55,90,140]` and escalating copy.
 - **The passphrase is not recoverable.** That is the point of AES-GCM, not a bug.
 - Sync is **non-blocking and never gates logging.** `localStorage` is the source of
   truth; the repo is a backup. Works fully offline, on a plane, with no token set.
+- **Push cadence:** debounced 1500 ms after a change, **plus a flush** on
+  `visibilitychange`→hidden / `pagehide` using `keepalive` and a cached `sha`, so a
+  change survives the tab being closed straight after. Pull on focus / visible /
+  `pageshow`, throttled to once per 4 s.
 - **Conflict resolution:** pull **unions** habits and their `days` maps (plus `seen`
   and `paused`) rather than replacing — no logged day is ever lost across devices —
   then pushes the merged superset. Converges (the union is idempotent). One accepted
@@ -155,7 +173,7 @@ marked seen. Weight → confetti count `[26,55,90,140]` and escalating copy.
 **Offline.** A minimal service worker (`sw.js`) serves the app shell **cache-first**,
 so a cold launch with no network still opens. *When `index.html` changes you must
 bump `VERSION` in `sw.js`* — that byte change is the only signal that makes a device
-install the new shell. Currently at `bloupunt-v4`.
+install the new shell. Currently at `bloupunt-v7`.
 
 **Deployment.** Two repos, and the separation *is* the security model — do not
 collapse them:
@@ -228,6 +246,53 @@ Rewrote the old `IMPLEMENTATION.txt` (which had gone stale — it still claimed
 `days` values are always `1` and listed streak freezes under "not doing") into this
 dated dev log.
 
+### 2026-07-11 13:04 — Bug: accidental edits with no undo
+**Reported:** "I accidentally pressed on the multi-month view and have 3 months of
+dates marked off by mistake with no way to undo."
+**Cause:** every cell in the multi-month grid was directly editable, so a stray tap
+changed a day instantly and irreversibly.
+**Fixes:**
+- The multi-month grid is now **view-only** — a read-only history heatmap.
+- Tapping a day in the 21-day strip opens a **day-edit chip** instead of changing it
+  instantly: *Mark done / tap to clear* for toggles, `−  value  +  Clear` for
+  counters (the chip offers both directions regardless of habit type, so a `+`-only
+  habit's mis-tap is still fixable). The selected cell is ringed; `×` closes.
+- Today's tick and the row `+/−` stay one-tap — the fast path is untouched.
+- Editor gains a confirm-guarded **"Clear all logged days"** (shows the count) as the
+  escape hatch for an accidental backfill that is now out of the strip's reach.
+This narrows backfill to the visible ~3 weeks, which is the intended range anyway.
+→ `sw.js v5`.
+
+### 2026-07-11 15:36 — Bug: PC changes never reached the phone
+**Reported:** "Open it on my PC, set some things up, close it. Open on my phone and
+it does not update."
+**Cause:** not the pull — that already unions whatever is on the server. The **push**
+was debounced 1500 ms with **no flush on close**, so closing the tab before it fired
+silently dropped the upload. It never reached GitHub, so there was nothing to pull.
+**Fixes:**
+- Track `pendingPush`; on `visibilitychange`→hidden and `pagehide`, flush it
+  immediately instead of waiting out the debounce.
+- The flush uses `fetch(..., {keepalive:true})` so the request survives page unload
+  (a normal fetch is cancelled), and a cached file `sha` so it needs no prior GET.
+- Also pull on `pageshow` (bfcache restore).
+→ `sw.js v6`.
+
+### 2026-07-23 07:19 — Reordering, and honest day colours
+Three items in one pass:
+- **Reorder habits.** Manage cards gain ↑/↓ buttons (ends disabled). Order is just
+  the array order, which the sync union already preserves. Touch-friendly and needs
+  no drag library — deliberate, given the no-dependency rule.
+- **Missed days now read as missed.** Previously an unlogged day and a mid-range
+  counter average were both near-paper, so gaps were invisible. Now **only logged
+  days get the gradient**; an unlogged day is a distinct darker grey (`#C8C2B8`)
+  *only if the habit was actually running that day*. Days before the habit started,
+  paused days, and today (still in grace) stay the neutral untouched tone. Applies to
+  toggle habits too, so a gap in the chain is legible everywhere.
+- **Pause is now fully honoured by counters.** Paused days no longer get a gradient
+  tone, and they are skipped entirely when computing the trailing 7-day average
+  (rather than counted as zeros), so a break can't drag the average down.
+→ `sw.js v7`.
+
 ---
 
 ## Still to do / open items
@@ -238,9 +303,11 @@ dated dev log.
   correct architecture is a tiny backend holding the token server-side (a Cloudflare
   Worker + KV, ~30 lines, free at this volume). Do **not** try to hide the token in
   the browser "more cleverly."
-- **Counter backfill in both directions.** Tapping a past cell applies the habit's
-  primary direction only (+1, or −1 for a `−` habit). Subtracting on a past day for a
-  `+/−` habit is not yet possible from the grid.
+- ~~Counter backfill in both directions.~~ **Done 2026-07-11** — the day-edit chip
+  offers `−` and `+` regardless of habit type.
+- **Backfill is capped at ~3 weeks** (the strip window) by design. Anything older is
+  view-only; the only way to change it is the editor's "Clear all logged days".
+  Revisit only if a genuine need to edit older history appears.
 - **Optional daily goal for `+` habits.** Considered and deferred — the current rule
   is "logging anything counts." Revisit if a target-based streak is ever wanted.
 - **Per-cell pause editing.** Pause is set forward-only via the chooser; there is no
