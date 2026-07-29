@@ -127,6 +127,7 @@
   .strip{display:flex;gap:3px;margin:14px 0 0 44px}
   .bar{flex:1;height:20px;max-width:16px;border-radius:5px;cursor:pointer;transition:transform 160ms ease}
   .bar:hover{transform:scale(1.28)}
+  .bar.marked,.cell.marked{box-shadow:inset 0 0 0 1px rgba(61,59,55,.34)}
   .bar.today{box-shadow:inset 0 0 0 1.5px var(--sageDeep)}
   .bar.sel{box-shadow:inset 0 0 0 2px var(--ink);transform:scale(1.15)}
 
@@ -672,13 +673,11 @@ function perfectStreak(){
   return n;
 }
 
+// Toggle habits are two-state: solid green when done, neutral otherwise. No day-3
+// intensity ramp and no missed-grey - done is done, everything else is untouched.
+// (The missed-grey and gradient live on counters, where legibility needs them.)
 function shade(h, d){
-  const days = h.days || {};
-  if (!has(days, keyFor(d))) return unloggedShade(h, d);
-  const p1 = new Date(d); p1.setDate(d.getDate()-1);
-  const p2 = new Date(d); p2.setDate(d.getDate()-2);
-  const run = (has(days,keyFor(p1))?1:0) + (has(days,keyFor(p2))?1:0);
-  return LEV[1+run];
+  return has(h.days || {}, keyFor(d)) ? LEV[3] : LEV[0];
 }
 
 function currentTier(){
@@ -946,7 +945,8 @@ function chainStrip(h){
     const lab = 'Edit '+k+(counter ? (', '+(h.days[k]||0)) : (h.days[k]?', done':', not done'));
     const pz  = (data.paused && data.paused[k] && !has(h.days,k)) ? ' paused' : '';
     const sel = (dayEdit && dayEdit.id===h.id && dayEdit.key===k) ? ' sel' : '';
-    return '<div class="bar'+(k===today?' today':'')+pz+sel+'" role="button" tabindex="0" '+
+    const mk  = has(h.days,k) ? ' marked' : '';   // 1px ring so a logged day reads even at a neutral fill
+    return '<div class="bar'+(k===today?' today':'')+pz+sel+mk+'" role="button" tabindex="0" '+
       'aria-label="'+lab+'" '+
       'style="background:'+bg+'" '+
       'onclick="'+act+'" '+
@@ -983,7 +983,7 @@ function fullGrid(h){
   // only through the day chip on the 21-day strip, so nothing here can be mis-tapped.
   const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
     const future = d > now, k = keyFor(d);
-    const cls = 'cell'+(future?' future':'')+(k===today?' today':'')+((data.paused && data.paused[k] && !has(h.days,k))?' paused':'');
+    const cls = 'cell'+(future?' future':'')+(k===today?' today':'')+((data.paused && data.paused[k] && !has(h.days,k))?' paused':'')+(has(h.days,k)?' marked':'');
     const bg  = counter ? col(d) : shade(h,d);
     return '<div class="'+cls+'" style="background:'+bg+'"></div>';
   }).join('') + '</div>').join('');

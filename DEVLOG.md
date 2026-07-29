@@ -124,16 +124,23 @@ the form object before any re-render. *Any new input field must be added to
 
 | state | colour | meaning |
 |-------|--------|---------|
-| logged (toggle) | sage, deepening on day 3+ of a run | the chain |
+| logged (toggle) | solid sage `#7A9A7E` | done — two-state, no intensity ramp |
 | logged (counter) | clay → paper → sage gradient | trailing 7-day average, normalised to the habit's own min/max — worst week red, best week green |
-| **missed** | darker grey `#C8C2B8` | habit was running, day is past, unlogged, not paused |
-| untouched | paper `#EDE9E2` | before the habit existed, paused, or today (still in grace) |
+| **missed** (counters only) | darker grey `#C8C2B8` | habit was running, day is past, unlogged, not paused |
+| untouched | paper `#EDE9E2` | not done (toggle), or before the habit existed / paused / today (grace) |
 
-Only **logged** days get a gradient tone — that is what keeps a mid-range average
-from looking identical to an unmarked day. `habitStart()` is the earlier of the
-habit's creation and its first logged day, so backfilled/imported history counts as
-"it existed then." `avg7()` **skips paused days entirely** rather than counting them
-as zeros, so a break never drags the average down.
+Every **marked** (logged) cell also carries a 1px inset ring
+(`rgba(61,59,55,.34)`), so a logged day reads as logged even when its gradient fill
+sits near the neutral tone. `today` / editing (`sel`) rings take precedence over it.
+
+Toggle habits are deliberately **two-state** (green / neutral) — the old day-3
+intensity ramp and the missed-grey were dropped there; the chain's row states already
+signal misses, and the grey/gradient only earn their keep on counters. Only **logged**
+counter days get a gradient tone — that is what keeps a mid-range average from looking
+identical to an unmarked day. `habitStart()` is the earlier of the habit's creation
+and its first logged day, so backfilled/imported history counts as "it existed then."
+`avg7()` **skips paused days entirely** rather than counting them as zeros, so a break
+never drags the average down.
 
 **Editing days.** The multi-month grid is **view-only**. Editing happens only via the
 day-edit chip, opened by tapping a cell in the 21-day strip — so backfill is capped
@@ -292,6 +299,17 @@ Three items in one pass:
   tone, and they are skipped entirely when computing the trailing 7-day average
   (rather than counted as zeros), so a break can't drag the average down.
 → `sw.js v7`.
+
+### 2026-07-29 18:56 — Legibility: solid green toggles + a marked-day ring
+- **Toggle habits are now two-state:** solid sage when done, neutral otherwise. The
+  day-3 intensity ramp (and the missed-grey on toggles) read as a confusing "gradient
+  over the week." Reverses the original *Atomic Habits* "streak colour intensifies"
+  idea for toggles — the row states still carry the never-miss-twice signal. Grey and
+  the gradient now live only on counters.
+- **Every logged cell gets a 1px darker inset ring** (`rgba(61,59,55,.34)`). The
+  mid-range counter gradient values sit close to the neutral background; the ring
+  makes a marked day legible regardless of fill. `today` and `sel` rings win over it.
+→ `sw.js v8`.
 
 ---
 
