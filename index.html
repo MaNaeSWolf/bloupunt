@@ -125,18 +125,20 @@
   .floorD strong{color:var(--ink);font-weight:500}
 
   .cell.marked{box-shadow:inset 0 0 0 1px rgba(61,59,55,.34)}
-  .chain{position:relative;margin:14px 0 0 44px;height:22px}
-  .necks{position:absolute;inset:0;pointer-events:none;z-index:0}
-  .neck{position:absolute;top:50%;transform:translateY(-50%);height:11px;border-radius:6px}
-  .chainRow{position:relative;display:flex;height:100%;z-index:1}
-  .nslot{flex:1;display:grid;place-items:center;cursor:pointer}
-  .node{width:17px;height:17px;max-width:100%;border-radius:50%;transition:transform 150ms ease}
-  .node.off{width:8px;height:8px;opacity:.9}      /* missed / untouched: small dead dot */
-  .node.pz{width:10px;height:10px}                /* paused: small neutral, neck bridges over it */
-  .nslot:hover .node{transform:scale(1.18)}
-  .node.marked{box-shadow:inset 0 0 0 1px rgba(61,59,55,.34)}
-  .node.today{box-shadow:inset 0 0 0 1.5px var(--sageDeep)}
-  .node.sel{box-shadow:inset 0 0 0 2px var(--ink);transform:scale(1.14)}
+  .ribbon{position:relative;margin:14px 0 0 44px;height:22px}
+  .rtrack{position:absolute;left:2px;right:2px;top:50%;height:4px;transform:translateY(-50%);background:var(--hair);border-radius:2px}
+  .rrow{position:relative;display:flex;height:100%;z-index:1}
+  .rslot{flex:1;display:grid;place-items:center;cursor:pointer}
+  .seg{width:100%;height:15px;transition:transform 150ms ease}
+  .seg.gap{background:transparent!important;height:4px}
+  .seg.s1{border-radius:8px 0 0 8px}
+  .seg.s2{border-radius:0}
+  .seg.s3{border-radius:0 8px 8px 0}
+  .seg.s4{border-radius:8px}
+  .seg.div{box-shadow:inset -1.5px 0 0 rgba(247,244,239,.55)}
+  .seg.selSeg{box-shadow:inset 0 0 0 2px var(--ink)}
+  .rslot:hover .seg{transform:scaleY(1.2)}
+  .tdot{width:9px;height:9px;border-radius:50%;background:transparent;border:1.5px solid var(--soft)}
 
   .exp{margin-top:18px;padding-top:16px;border-top:1px solid var(--hair)}
   .detail{margin-bottom:10px}
@@ -587,12 +589,21 @@ function unloggedShade(h, d){
 // against the habit's average value, in 20%-of-average steps (higher is always
 // better, so avoidance counters with a negative average colour correctly too).
 // e.g. average 10, day 9 -> one step below -> lands green.
-const BANDS = ['#9E5B44','#C0836B','#EDE9E2','#7A9A7E','#5E8163']; // -2 -1 0 +1 +2
+// Soft in the middle, bold at the ends, so the five steps read as five (not 2+2).
+const BANDS = ['#B06A4F','#DDB4A4','#EDE9E2','#AFC7B2','#5E8163']; // -2 -1 0 +1 +2
 
+// Reference average: the mean of LOGGED days over the trailing 21 days only. Missed
+// days are skipped (not zeros), so a new habit's average moves fast, then a rolling
+// three-week window keeps it stable without old history dragging it forever.
 function counterAvg(h){
-  const days = h.days || {}, paused = data.paused || {};
+  const days = h.days || {};
   let sum = 0, n = 0;
-  for (const k of Object.keys(days)){ if (paused[k]) continue; sum += days[k]; n++; }
+  const c = midnight();
+  for (let i=0;i<21;i++){
+    const k = keyFor(c);
+    if (has(days, k)){ sum += days[k]; n++; }
+    c.setDate(c.getDate()-1);
+  }
   return n ? sum/n : 0;
 }
 function bandColour(v, A){
@@ -945,11 +956,12 @@ const CHEV_SVG = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none">'+
   '<path d="M2.5 4.5L6 8L9.5 4.5" stroke="#8A857D" stroke-width="1.4" '+
   'stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-// Chain view: each day is a dot. Consecutive completed days are joined by a neck so
-// a run reads as one linked shape (individual days still show as bumps). A missed day
-// breaks the link and leaves a dead gap; a paused day is bridged (the neck passes
-// over it) so an intentional break doesn't look like a failure.
+// Chain view (ribbon): a run of consecutive completed days is drawn as one solid
+// rounded bar over a faint baseline track, with light dividers so each day still
+// reads. A missed day is a gap in the bar (the break lands); a paused day is bridged
+// (a lighter segment keeps the bar going) so an intentional break isn't a failure.
 const N_DAYS = 21;
+const PAUSE_SEG = '#DEE4DD';
 function chainStrip(h){
   const today = todayKey();
   const counter = isCounter(h), col = counter ? counterScale(h) : null;
@@ -965,28 +977,36 @@ function chainStrip(h){
     };
   });
 
-  // Necks between consecutive logged days, but only when every day between is paused.
+  // A slot belongs to a run if it's logged, or paused strictly between two logged days.
+  const inRun = info.map(x => x.logged);
   const logged = info.map((x,i)=>x.logged?i:-1).filter(i=>i>=0);
-  let necks = '';
   for (let n=0;n<logged.length-1;n++){
     const a = logged[n], b = logged[n+1];
     let bridged = true;
     for (let m=a+1;m<b;m++){ if (!info[m].paused){ bridged = false; break; } }
-    if (!bridged) continue;
-    necks += '<div class="neck" style="left:'+((a+0.5)/N_DAYS*100)+'%;width:'+((b-a)/N_DAYS*100)+'%;background:'+info[a].bg+'"></div>';
+    if (bridged) for (let m=a+1;m<b;m++) inRun[m] = true;
   }
 
-  const nodes = info.map(x => {
+  const cells = info.map((x,i) => {
     const act = 'openDay('+h.id+',\''+x.k+'\')';
-    const state = x.logged ? ' on' : x.paused ? ' pz' : ' off';
-    const cls = 'node'+state+(x.logged?' marked':'')+(x.today?' today':'')+(x.sel?' sel':'');
     const lab = 'Edit '+x.k+(counter?(', '+(h.days[x.k]||0)):(x.logged?', done':', not done'));
-    return '<div class="nslot" role="button" tabindex="0" aria-label="'+lab+'" onclick="'+act+'" '+
-      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}">'+
-      '<div class="'+cls+'" style="background:'+x.bg+'"></div></div>';
+    let inner;
+    if (x.today && !x.logged){
+      inner = '<div class="tdot"></div>';                       // today, not yet logged
+    } else if (!inRun[i]){
+      inner = '<div class="seg gap"></div>';                    // missed / untouched: just the track
+    } else {
+      const first = !inRun[i-1], last = !inRun[i+1];
+      const shape = first&&last ? 's4' : first ? 's1' : last ? 's3' : 's2';
+      const div = last ? '' : ' div';                           // interior day divider
+      const fill = x.logged ? x.bg : PAUSE_SEG;
+      inner = '<div class="seg '+shape+div+(x.sel?' selSeg':'')+'" style="background:'+fill+'"></div>';
+    }
+    return '<div class="rslot" role="button" tabindex="0" aria-label="'+lab+'" onclick="'+act+'" '+
+      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}">'+inner+'</div>';
   }).join('');
 
-  return '<div class="chain"><div class="necks">'+necks+'</div><div class="chainRow">'+nodes+'</div></div>';
+  return '<div class="ribbon"><div class="rtrack"></div><div class="rrow">'+cells+'</div></div>';
 }
 
 function fullGrid(h){

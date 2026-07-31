@@ -327,6 +327,21 @@ Two experimental changes to try on-device:
   revert. Toggle habits are unaffected (still solid green / neutral).
 → `sw.js v9`. **Status: on trial** — may be reverted to `checkpoint-v8`.
 
+### 2026-07-31 08:18 — Ribbon chain + rolling average + softer bands
+Feedback on the v9 trial: the dot-and-neck chain looked messy; the bands read as
+just 2 reds + 2 greens; the average should be recent, not all-time.
+- **Chain → ribbon.** A run of completed days is now one solid rounded bar over a
+  faint track, with light per-day dividers; a miss is a gap, a paused day is a
+  bridged lighter segment. Reads calmer and more positive than the beaded dots.
+  (Two alternatives — clean linked-dots, and a continuous progress-track — were
+  mocked up for the user to choose from; ribbon is the default.)
+- **Rolling average.** `counterAvg()` now averages only LOGGED days over the trailing
+  **21 days** (missed days skipped, not counted as zero). New habits settle fast; a
+  three-week window then keeps the reference stable without ancient history dragging.
+- **Softer bands.** Palette is now bold-ends / soft-middles
+  (`#B06A4F #DDB4A4 #EDE9E2 #AFC7B2 #5E8163`) so the five steps read as five.
+→ `sw.js v10`. **Status: on trial.**
+
 ---
 
 ## Still to do / open items
