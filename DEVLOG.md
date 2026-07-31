@@ -311,6 +311,22 @@ Three items in one pass:
   makes a marked day legible regardless of fill. `today` and `sel` rings win over it.
 → `sw.js v8`.
 
+### 2026-07-31 08:00 — EXPERIMENT: chain view + 5-band colour
+Tagged **`checkpoint-v8`** first (revert with `git reset --hard checkpoint-v8`).
+Two experimental changes to try on-device:
+- **Chain view.** The 21-day strip is no longer separate bars — each day is a dot,
+  and consecutive completed days are joined by a neck so a run reads as one linked
+  shape while individual days stay visible as bumps. A missed day breaks the link and
+  leaves a small dead dot; a paused day is bridged (the neck passes over it). Pure
+  CSS/positioning, no SVG filter — responsive and no dependency.
+- **Five colour steps** (was a continuous gradient). Counter days now fall into one of
+  5 bands — deep-red, red, neutral, green, deep-green — scored against the habit's
+  average value in 20%-of-average steps, "higher is better" so avoidance counters
+  colour correctly too. Reference `bandColour(v, A)` / `counterAvg()`. The old
+  `avg7`-gradient (`diverge`/`lerpHex`/`CTR_*`) is now dead code, kept for an easy
+  revert. Toggle habits are unaffected (still solid green / neutral).
+→ `sw.js v9`. **Status: on trial** — may be reverted to `checkpoint-v8`.
+
 ---
 
 ## Still to do / open items

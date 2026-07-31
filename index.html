@@ -124,12 +124,19 @@
   .floorD{font-size:13px;color:var(--soft);line-height:1.55}
   .floorD strong{color:var(--ink);font-weight:500}
 
-  .strip{display:flex;gap:3px;margin:14px 0 0 44px}
-  .bar{flex:1;height:20px;max-width:16px;border-radius:5px;cursor:pointer;transition:transform 160ms ease}
-  .bar:hover{transform:scale(1.28)}
-  .bar.marked,.cell.marked{box-shadow:inset 0 0 0 1px rgba(61,59,55,.34)}
-  .bar.today{box-shadow:inset 0 0 0 1.5px var(--sageDeep)}
-  .bar.sel{box-shadow:inset 0 0 0 2px var(--ink);transform:scale(1.15)}
+  .cell.marked{box-shadow:inset 0 0 0 1px rgba(61,59,55,.34)}
+  .chain{position:relative;margin:14px 0 0 44px;height:22px}
+  .necks{position:absolute;inset:0;pointer-events:none;z-index:0}
+  .neck{position:absolute;top:50%;transform:translateY(-50%);height:11px;border-radius:6px}
+  .chainRow{position:relative;display:flex;height:100%;z-index:1}
+  .nslot{flex:1;display:grid;place-items:center;cursor:pointer}
+  .node{width:17px;height:17px;max-width:100%;border-radius:50%;transition:transform 150ms ease}
+  .node.off{width:8px;height:8px;opacity:.9}      /* missed / untouched: small dead dot */
+  .node.pz{width:10px;height:10px}                /* paused: small neutral, neck bridges over it */
+  .nslot:hover .node{transform:scale(1.18)}
+  .node.marked{box-shadow:inset 0 0 0 1px rgba(61,59,55,.34)}
+  .node.today{box-shadow:inset 0 0 0 1.5px var(--sageDeep)}
+  .node.sel{box-shadow:inset 0 0 0 2px var(--ink);transform:scale(1.14)}
 
   .exp{margin-top:18px;padding-top:16px;border-top:1px solid var(--hair)}
   .detail{margin-bottom:10px}
@@ -214,7 +221,7 @@
     *{transition:none!important}
     .confetti,.breath{display:none}
     .sheet{animation:none}
-    .bar:hover,.cell:hover{transform:none}
+    .nslot:hover .node,.cell:hover{transform:none}
   }
 </style>
 </head>
@@ -576,29 +583,33 @@ function unloggedShade(h, d){
   return MISSED;
 }
 
+// Five discrete colour steps: 2 negative, neutral, 2 positive. A day is scored
+// against the habit's average value, in 20%-of-average steps (higher is always
+// better, so avoidance counters with a negative average colour correctly too).
+// e.g. average 10, day 9 -> one step below -> lands green.
+const BANDS = ['#9E5B44','#C0836B','#EDE9E2','#7A9A7E','#5E8163']; // -2 -1 0 +1 +2
+
+function counterAvg(h){
+  const days = h.days || {}, paused = data.paused || {};
+  let sum = 0, n = 0;
+  for (const k of Object.keys(days)){ if (paused[k]) continue; sum += days[k]; n++; }
+  return n ? sum/n : 0;
+}
+function bandColour(v, A){
+  const step = 0.2 * Math.abs(A);
+  if (step < 1e-9) return v>0 ? BANDS[3] : v<0 ? BANDS[1] : BANDS[2];   // no average yet
+  const u = (v - A) / step;                        // signed distance in 20% steps
+  const b = u >= 0.5 ? 2 : u >= -0.5 ? 1 : u >= -1.5 ? 0 : u >= -2.5 ? -1 : -2;
+  return BANDS[b + 2];
+}
+
 function counterScale(h){
-  // Normalised trailing-7-day averages, used to tint LOGGED days only. Unlogged
-  // days never get a gradient tone - that's what made a mid average look untouched.
   const days = h.days || {};
-  const avg = {};
-  let min = Infinity, max = -Infinity;
-  const start = habitStart(h);
-  const base = midnight();
-  for (let i=0;i<133;i++){
-    const day = new Date(base); day.setDate(base.getDate()-i);
-    if (start && day < start) continue;
-    const k = keyFor(day);
-    if (!has(days, k)) continue;               // only logged days define the scale
-    const a = avg7(h, day);
-    avg[k] = a;
-    if (a<min) min=a; if (a>max) max=a;
-  }
-  const range = max - min;
+  const A = counterAvg(h);
   return d => {
     const k = keyFor(d);
     if (!has(days, k)) return unloggedShade(h, d);
-    const a = (k in avg) ? avg[k] : avg7(h, d);
-    return diverge(range < 1e-9 ? 0.72 : (a-min)/range);
+    return bandColour(days[k], A);                 // colour each logged day by its own value
   };
 }
 
@@ -934,24 +945,48 @@ const CHEV_SVG = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none">'+
   '<path d="M2.5 4.5L6 8L9.5 4.5" stroke="#8A857D" stroke-width="1.4" '+
   'stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
+// Chain view: each day is a dot. Consecutive completed days are joined by a neck so
+// a run reads as one linked shape (individual days still show as bumps). A missed day
+// breaks the link and leaves a dead gap; a paused day is bridged (the neck passes
+// over it) so an intentional break doesn't look like a failure.
+const N_DAYS = 21;
 function chainStrip(h){
   const today = todayKey();
   const counter = isCounter(h), col = counter ? counterScale(h) : null;
-  return '<div class="strip">' + windowDays(21).map(d => {
+  const info = windowDays(N_DAYS).map(d => {
     const k = keyFor(d);
-    const bg  = counter ? col(d) : shade(h,d);
-    // Tapping a day opens the edit chip - never an instant change - so backfill is deliberate.
-    const act = 'openDay('+h.id+',\''+k+'\')';
-    const lab = 'Edit '+k+(counter ? (', '+(h.days[k]||0)) : (h.days[k]?', done':', not done'));
-    const pz  = (data.paused && data.paused[k] && !has(h.days,k)) ? ' paused' : '';
-    const sel = (dayEdit && dayEdit.id===h.id && dayEdit.key===k) ? ' sel' : '';
-    const mk  = has(h.days,k) ? ' marked' : '';   // 1px ring so a logged day reads even at a neutral fill
-    return '<div class="bar'+(k===today?' today':'')+pz+sel+mk+'" role="button" tabindex="0" '+
-      'aria-label="'+lab+'" '+
-      'style="background:'+bg+'" '+
-      'onclick="'+act+'" '+
-      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}"></div>';
-  }).join('') + '</div>';
+    return {
+      k,
+      logged: has(h.days, k),
+      paused: !!(data.paused && data.paused[k] && !has(h.days,k)),
+      today:  k===today,
+      sel:    !!(dayEdit && dayEdit.id===h.id && dayEdit.key===k),
+      bg:     counter ? col(d) : shade(h,d)
+    };
+  });
+
+  // Necks between consecutive logged days, but only when every day between is paused.
+  const logged = info.map((x,i)=>x.logged?i:-1).filter(i=>i>=0);
+  let necks = '';
+  for (let n=0;n<logged.length-1;n++){
+    const a = logged[n], b = logged[n+1];
+    let bridged = true;
+    for (let m=a+1;m<b;m++){ if (!info[m].paused){ bridged = false; break; } }
+    if (!bridged) continue;
+    necks += '<div class="neck" style="left:'+((a+0.5)/N_DAYS*100)+'%;width:'+((b-a)/N_DAYS*100)+'%;background:'+info[a].bg+'"></div>';
+  }
+
+  const nodes = info.map(x => {
+    const act = 'openDay('+h.id+',\''+x.k+'\')';
+    const state = x.logged ? ' on' : x.paused ? ' pz' : ' off';
+    const cls = 'node'+state+(x.logged?' marked':'')+(x.today?' today':'')+(x.sel?' sel':'');
+    const lab = 'Edit '+x.k+(counter?(', '+(h.days[x.k]||0)):(x.logged?', done':', not done'));
+    return '<div class="nslot" role="button" tabindex="0" aria-label="'+lab+'" onclick="'+act+'" '+
+      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}">'+
+      '<div class="'+cls+'" style="background:'+x.bg+'"></div></div>';
+  }).join('');
+
+  return '<div class="chain"><div class="necks">'+necks+'</div><div class="chainRow">'+nodes+'</div></div>';
 }
 
 function fullGrid(h){
