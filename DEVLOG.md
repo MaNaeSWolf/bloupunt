@@ -340,7 +340,16 @@ just 2 reds + 2 greens; the average should be recent, not all-time.
   three-week window then keeps the reference stable without ancient history dragging.
 - **Softer bands.** Palette is now bold-ends / soft-middles
   (`#B06A4F #DDB4A4 #EDE9E2 #AFC7B2 #5E8163`) so the five steps read as five.
-→ `sw.js v10`. **Status: on trial.**
+→ `sw.js v10`. **Status: kept** — ribbon and the softened bands were accepted; the
+continuous-gradient code (`diverge`/`lerpHex`/`CTR_*`) remains dead but is left in
+place for now.
+
+### 2026-07-31 (later) — Fix month-label overlap in the grid
+The multi-month grid forced a label on the oldest column, so when the window started
+mid-month (today 31 Jul → a one-week Mar stub before Apr) the "Mar" and "Apr" labels
+collided. Now a label is suppressed when its month is a narrow sliver (< 3
+week-columns before the next month); the current month is exempt (nothing follows it
+to overlap). → `sw.js v11`.
 
 ---
 
