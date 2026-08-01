@@ -91,9 +91,9 @@
   .cnum{min-width:22px;text-align:center;font-family:'Fraunces',Georgia,serif;font-size:20px;color:var(--soft)}
   .cnum.pos{color:var(--sageDeep)}
   .cnum.neg{color:var(--clay)}
-  .seg{display:flex;gap:6px}
-  .segBtn{flex:1;background:var(--bg);border:1px solid var(--faint);color:var(--soft);
-    padding:9px 4px;font-size:13px;font-weight:500;border-radius:10px}
+  .seg{display:flex;gap:5px}
+  .segBtn{flex:1 1 0;min-width:0;background:var(--bg);border:1px solid var(--faint);color:var(--soft);
+    padding:9px 2px;font-size:12px;font-weight:500;border-radius:10px;text-align:center;white-space:nowrap}
   .segBtn.on{background:var(--sage);border-color:var(--sage);color:#fff}
   .navGrp{display:flex;gap:8px;flex-shrink:0}
   .bar.paused,.cell.paused{box-shadow:inset 0 0 0 1.5px #CBDCCD}
@@ -141,11 +141,11 @@
   .tdot{width:9px;height:9px;border-radius:50%;background:transparent;border:1.5px solid var(--soft)}
   .bigScore{width:46px;height:38px;flex-shrink:0;border-radius:12px;display:grid;place-items:center;
     font-family:'Fraunces',Georgia,serif;font-size:22px;font-weight:500}
-  .sribbon{display:flex;gap:3px;margin:14px 0 0 44px}
-  .sslot{flex:1;display:grid;place-items:center}
-  .sbub{width:21px;height:21px;max-width:100%;border-radius:50%;display:grid;place-items:center;
-    font-size:9.5px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
-  .sbub.off{width:8px;height:8px;background:var(--hair)}
+  .sribbon{display:flex;gap:2px;margin:14px 0 0 44px}
+  .sslot{flex:1;min-width:0;display:grid;place-items:center}
+  .sbub{width:100%;max-width:22px;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;
+    font-size:9px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+  .sbub.off{width:8px;height:8px;aspect-ratio:auto;background:var(--hair)}
   .scell{width:16px;height:16px;border-radius:3px;display:grid;place-items:center;background:var(--hair);
     font-size:8px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
   .scell.future{background:transparent}

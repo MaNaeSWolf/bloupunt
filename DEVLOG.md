@@ -362,6 +362,12 @@ month grid when expanded (`scoreGrid`, 16px cells). Read-only — no ticking. Ex
 from streaks, perfect-days, tier, milestones, the "recorded" count and the ~3-habit
 cap. Core helpers: `dayScore(k)`, `scoreAvg()`. → `sw.js v12`.
 
+### 2026-08-01 (later) — Fix mobile overflow
+Score bubbles had a fixed 21px width, so 21 of them bled off a phone; the 5th seg
+button ("Score") pushed the editor row past its card. Both made shrink-to-fit:
+`.sbub` is now `width:100%; max-width:22px; aspect-ratio:1` in a `min-width:0` slot,
+and `.segBtn` is `flex:1 1 0; min-width:0` with smaller padding/font. → `sw.js v13`.
+
 ---
 
 ## Still to do / open items
