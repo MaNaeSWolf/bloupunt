@@ -351,6 +351,17 @@ collided. Now a label is suppressed when its month is a narrow sliver (< 3
 week-columns before the next month); the current month is exempt (nothing follows it
 to overlap). → `sw.js v11`.
 
+### 2026-08-01 07:39 — Day Score card
+A computed card (`type:'score'`, at most one, created/destroyed like a habit via a
+"Score" option in the editor). It totals every habit each day: a toggle scores +2
+when marked; a counter scores +1 just for logging plus its band index (−2..+2), so
+showing up beats not — a bad-scoring day still nets more than skipping. Shows only a
+big today's-score chip and the word "Score"; a bubble per day with the number inside,
+coloured by the same 5 bands (`bandIndex`/`bandColour`/`bandInk`); and a numbered
+month grid when expanded (`scoreGrid`, 16px cells). Read-only — no ticking. Excluded
+from streaks, perfect-days, tier, milestones, the "recorded" count and the ~3-habit
+cap. Core helpers: `dayScore(k)`, `scoreAvg()`. → `sw.js v12`.
+
 ---
 
 ## Still to do / open items

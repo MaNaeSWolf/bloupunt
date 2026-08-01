@@ -139,6 +139,17 @@
   .seg.selSeg{box-shadow:inset 0 0 0 2px var(--ink)}
   .rslot:hover .seg{transform:scaleY(1.2)}
   .tdot{width:9px;height:9px;border-radius:50%;background:transparent;border:1.5px solid var(--soft)}
+  .bigScore{width:46px;height:38px;flex-shrink:0;border-radius:12px;display:grid;place-items:center;
+    font-family:'Fraunces',Georgia,serif;font-size:22px;font-weight:500}
+  .sribbon{display:flex;gap:3px;margin:14px 0 0 44px}
+  .sslot{flex:1;display:grid;place-items:center}
+  .sbub{width:21px;height:21px;max-width:100%;border-radius:50%;display:grid;place-items:center;
+    font-size:9.5px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+  .sbub.off{width:8px;height:8px;background:var(--hair)}
+  .scell{width:16px;height:16px;border-radius:3px;display:grid;place-items:center;background:var(--hair);
+    font-size:8px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+  .scell.future{background:transparent}
+  .months .mCol.wide{width:16px}
 
   .exp{margin-top:18px;padding-top:16px;border-top:1px solid var(--hair)}
   .detail{margin-bottom:10px}
@@ -529,6 +540,8 @@ window.addEventListener('pageshow', autoPull);    // bfcache restore
 /* ═══════════════ STATS ═══════════════ */
 
 const isCounter = h => h.type === 'plus' || h.type === 'minus' || h.type === 'plusminus';
+const isScore   = h => h.type === 'score';
+const hasScore  = () => data.habits.some(isScore);
 // "Logged" == a record exists for that day. Toggle stores 1; a counter may store
 // 0 or a negative net and still counts, because the goal is simply to log.
 const has = (days, k) => days[k] !== undefined;
@@ -606,13 +619,16 @@ function counterAvg(h){
   }
   return n ? sum/n : 0;
 }
-function bandColour(v, A){
+// Band index -2..+2: where a value sits vs the average, in 20%-of-average steps.
+function bandIndex(v, A){
   const step = 0.2 * Math.abs(A);
-  if (step < 1e-9) return v>0 ? BANDS[3] : v<0 ? BANDS[1] : BANDS[2];   // no average yet
-  const u = (v - A) / step;                        // signed distance in 20% steps
-  const b = u >= 0.5 ? 2 : u >= -0.5 ? 1 : u >= -1.5 ? 0 : u >= -2.5 ? -1 : -2;
-  return BANDS[b + 2];
+  if (step < 1e-9) return 0;                        // not enough history to place it
+  const u = (v - A) / step;
+  return u >= 0.5 ? 2 : u >= -0.5 ? 1 : u >= -1.5 ? 0 : u >= -2.5 ? -1 : -2;
 }
+function bandColour(v, A){ return BANDS[bandIndex(v, A) + 2]; }
+// Text colour that stays legible on its band (white on the bold ends, ink otherwise).
+function bandInk(v, A){ return Math.abs(bandIndex(v, A)) >= 2 ? '#FFFFFF' : '#3D3B37'; }
 
 function counterScale(h){
   const days = h.days || {};
@@ -622,6 +638,28 @@ function counterScale(h){
     if (!has(days, k)) return unloggedShade(h, d);
     return bandColour(days[k], A);                 // colour each logged day by its own value
   };
+}
+
+/* ═══════════════ DAY SCORE ═══════════════
+   A computed card (type 'score', at most one). Each day sums every habit's points:
+   toggle +2 when marked; counter +1 just for logging, plus its band (-2..+2). So
+   showing up beats not, even on a bad day. */
+function dayScore(k){
+  let s = 0;
+  for (const h of data.habits){
+    if (isScore(h)) continue;
+    if (isCounter(h)){
+      if (has(h.days, k)) s += 1 + bandIndex(h.days[k], counterAvg(h));
+    } else if (has(h.days, k)) s += 2;             // toggle marked
+  }
+  return s;
+}
+const dayHasLog = k => data.habits.some(h => !isScore(h) && has(h.days, k));
+// The score's own reference average: mean of scored days over the trailing 21 days.
+function scoreAvg(){
+  let sum = 0, n = 0; const c = midnight();
+  for (let i=0;i<21;i++){ const k = keyFor(c); if (dayHasLog(k)){ sum += dayScore(k); n++; } c.setDate(c.getDate()-1); }
+  return n ? sum/n : 0;
 }
 
 function statsFor(h){
@@ -680,9 +718,10 @@ function statsFor(h){
 }
 
 function perfectStreak(){
-  if (!data.habits.length) return 0;
+  const habits = data.habits.filter(h => !isScore(h));   // the score isn't a habit you do
+  if (!habits.length) return 0;
   const paused = data.paused || {};
-  const allDone = d => data.habits.every(h => has(h.days||{}, keyFor(d)));   // recorded, any type
+  const allDone = d => habits.every(h => has(h.days||{}, keyFor(d)));        // recorded, any type
   let n = 0, g = 0;
   const c = midnight();
   if (!allDone(c)) c.setDate(c.getDate()-1);
@@ -703,7 +742,7 @@ function shade(h, d){
 }
 
 function currentTier(){
-  const streaks = data.habits.map(h => statsFor(h).streak);   // counters count too
+  const streaks = data.habits.filter(h => !isScore(h)).map(h => statsFor(h).streak);   // counters count too
   const best = Math.max(perfectStreak(), 0, ...streaks);
   let t = TIERS[0];
   for (const x of TIERS) if (best >= x.min) t = x;
@@ -724,6 +763,7 @@ function checkMilestones(){
   }
 
   for (const h of data.habits){
+    if (isScore(h)) continue;                            // the score has no streak
     const s = statsFor(h);                               // counters earn recording streaks too
     for (const m of STREAK_MARKS){
       const id = 'streak:'+h.id+':'+m.d;
@@ -744,11 +784,11 @@ function checkMilestones(){
 window.toggle = (id, k) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  const wasAll = data.habits.length > 0 && data.habits.every(x => has(x.days, todayKey()));
+  const wasAll = data.habits.filter(x=>!isScore(x)).length > 0 && data.habits.filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
 
   if (h.days[k]) delete h.days[k]; else h.days[k] = 1;
 
-  const nowAll = data.habits.length > 0 && data.habits.every(x => has(x.days, todayKey()));
+  const nowAll = data.habits.filter(x=>!isScore(x)).length > 0 && data.habits.filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
   if (k === todayKey() && nowAll && !wasAll && data.habits.length > 1){
     flash = true;
     setTimeout(() => { flash = false; render(); }, 1400);
@@ -770,9 +810,9 @@ window.toggleExpand = id => { expanded = (expanded === id) ? null : id; render()
 window.bump = (id, k, delta) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  const wasAll = data.habits.length > 0 && data.habits.every(x => has(x.days, todayKey()));
+  const wasAll = data.habits.filter(x=>!isScore(x)).length > 0 && data.habits.filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
   h.days[k] = (h.days[k] || 0) + delta;    // net value persists even at 0 - the goal is to log
-  const nowAll = data.habits.length > 0 && data.habits.every(x => has(x.days, todayKey()));
+  const nowAll = data.habits.filter(x=>!isScore(x)).length > 0 && data.habits.filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
   if (k === todayKey() && nowAll && !wasAll && data.habits.length > 1){
     flash = true;
     setTimeout(() => { flash = false; render(); }, 1400);
@@ -844,6 +884,16 @@ window.cancelEdit = () => { editing = null; render(); };
 
 window.commit = () => {
   grab();
+  if (form.type === 'score'){                 // the computed card: name is fixed, single instance
+    if (editing === 'new'){
+      if (hasScore()) { editing = null; render(); return; }
+      data.habits.push({ id: Date.now(), name:'Score', type:'score', days:{} });
+    } else {
+      const h = data.habits.find(x => x.id === editing);
+      if (h){ h.type = 'score'; h.name = 'Score'; }
+    }
+    save(); editing = null; render(); return;
+  }
   const name = form.name.trim();
   if (!name) return;
   const payload = {
@@ -1151,7 +1201,70 @@ function counterRow(h, today){
   '</div>';
 }
 
+// The Day Score card: bubbles with the day's number, a big today's score, and a
+// numbered month grid when expanded. All coloured by the same 5 bands. Read-only.
+function scoreRow(h){
+  const open = expanded === h.id;
+  const today = todayKey();
+  const A = scoreAvg();
+  const tHas = dayHasLog(today);
+  const tScore = dayScore(today);
+
+  const bubbles = windowDays(21).map(d => {
+    const k = keyFor(d), t = k===today;
+    if (!dayHasLog(k)) return '<div class="sslot">'+(t?'<div class="tdot"></div>':'<div class="sbub off"></div>')+'</div>';
+    const v = dayScore(k);
+    return '<div class="sslot"><div class="sbub" style="background:'+bandColour(v,A)+';color:'+bandInk(v,A)+'">'+v+'</div></div>';
+  }).join('');
+
+  let expBlock='';
+  if (open){
+    let tot=0; const c=midnight();
+    for (let i=0;i<30;i++){ const k=keyFor(c); if (dayHasLog(k)) tot+=dayScore(k); c.setDate(c.getDate()-1); }
+    expBlock = '<div class="exp"><div class="stats">'+
+      '<div><div class="sl">Today</div><div class="sv">'+(tHas?tScore:'—')+'</div></div>'+
+      '<div><div class="sl">30-day total</div><div class="sv">'+tot+'</div></div>'+
+      '</div>'+ scoreGrid(A) + '</div>';
+  }
+
+  return '<div class="row score">'+
+    '<div class="top">'+
+      '<div class="bigScore" style="background:'+(tHas?bandColour(tScore,A):'var(--faint)')+';color:'+(tHas?bandInk(tScore,A):'var(--soft)')+'">'+(tHas?tScore:'–')+'</div>'+
+      '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
+        '<div class="nameLine"><span class="hname">Score</span></div>'+
+      '</button>'+
+      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+    '</div>'+
+    '<div class="sribbon">'+bubbles+'</div>'+ expBlock +
+  '</div>';
+}
+
+function scoreGrid(A){
+  const end = midnight();
+  const dow = (end.getDay() + 6) % 7;
+  const weekEnd = new Date(end); weekEnd.setDate(end.getDate() + (6 - dow));
+  const weeks = [];
+  for (let w=17; w>=0; w--){ const col=[]; for (let r=0;r<7;r++){ const d=new Date(weekEnd); d.setDate(weekEnd.getDate()-w*7-(6-r)); col.push(d);} weeks.push(col); }
+  const now = new Date();
+  const change = weeks.map((w,i)=> i===0 || weeks[i-1][0].getMonth() !== w[0].getMonth());
+  const months = weeks.map((w,i)=>{
+    if (!change[i]) return '<div class="mCol wide"></div>';
+    let seg=1; for (let j=i+1;j<weeks.length && !change[j];j++) seg++;
+    const show = (i+seg)>=weeks.length || seg>=3;
+    return '<div class="mCol wide">'+(show?'<span>'+MONTHS[w[0].getMonth()]+'</span>':'')+'</div>';
+  }).join('');
+  const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
+    const future = d > now, k = keyFor(d);
+    if (future) return '<div class="scell future"></div>';
+    if (!dayHasLog(k)) return '<div class="scell"></div>';
+    const v = dayScore(k);
+    return '<div class="scell" style="background:'+bandColour(v,A)+';color:'+bandInk(v,A)+'">'+v+'</div>';
+  }).join('') + '</div>').join('');
+  return '<div class="gridWrap"><div class="gridIn"><div class="months">'+months+'</div><div class="weeks">'+cols+'</div></div></div>';
+}
+
 function habitRow(h){
+  if (isScore(h)) return scoreRow(h);
   const today = todayKey();
   if (isCounter(h)) return counterRow(h, today);
   const done  = !!h.days[today];
@@ -1229,15 +1342,38 @@ function typeHint(t){
   return t==='plus' ? 'Tap + each time (e.g. a glass of water). Cells are tinted by your 7-day average.'
     : t==='minus' ? 'Tap − each time (e.g. a slip you want to avoid). Cells are tinted by your 7-day average.'
     : t==='plusminus' ? 'Both buttons: + for a win, − for a slip. The day is the running total, tinted by your 7-day average.'
+    : t==='score' ? 'One computed card that totals every habit each day (toggle +2, counter +1 to log plus its band). Nothing to tick — only one allowed.'
     : 'A simple daily tick. Builds streaks, milestones and the warming background.';
 }
 
 const typeLabel = t => t==='plus' ? 'Counter · +'
   : t==='minus' ? 'Counter · −'
-  : t==='plusminus' ? 'Counter · +/−' : 'Tick';
+  : t==='plusminus' ? 'Counter · +/−'
+  : t==='score' ? 'Day score'
+  : 'Tick';
 
 function editorHTML(title){
   const eh = (editing && editing !== 'new') ? data.habits.find(x => x.id === editing) : null;
+  const allowScore = !hasScore() || form.type === 'score';   // at most one score card
+  const seg = '<div class="fld">'+
+      '<label class="lbl">How you log it</label>'+
+      '<div class="seg">'+
+        segBtn('toggle','Tick')+ segBtn('plus','+')+ segBtn('minus','−')+ segBtn('plusminus','+/−')+
+        (allowScore ? segBtn('score','Score') : '')+
+      '</div>'+
+      '<p class="hint">'+typeHint(form.type)+'</p>'+
+    '</div>';
+
+  if (form.type === 'score'){                                // stripped editor - nothing to name/cue
+    return '<div class="editor">'+
+      '<h3>'+title+'</h3>'+ seg +
+      '<div class="acts">'+
+        '<button class="btnP" onclick="commit()">Save</button>'+
+        '<button class="btnG" onclick="cancelEdit()">Cancel</button>'+
+      '</div>'+
+    '</div>';
+  }
+
   const clearBlock = !eh ? '' :
     (clearHist === eh.id
       ? '<div class="chip" style="margin:16px 0 0">'+
@@ -1252,13 +1388,7 @@ function editorHTML(title){
       '<label class="lbl" for="fName">The habit</label>'+
       '<input id="fName" value="'+esc(form.name)+'" placeholder="Read" autofocus>'+
     '</div>'+
-    '<div class="fld">'+
-      '<label class="lbl">How you log it</label>'+
-      '<div class="seg">'+
-        segBtn('toggle','Tick')+ segBtn('plus','+')+ segBtn('minus','−')+ segBtn('plusminus','+/−')+
-      '</div>'+
-      '<p class="hint">'+typeHint(form.type)+'</p>'+
-    '</div>'+
+    seg +
     '<div class="fld">'+
       '<label class="lbl" for="fCue">When and where</label>'+
       '<input id="fCue" value="'+esc(form.cue)+'" placeholder="At 9pm, in the bedroom">'+
@@ -1377,15 +1507,16 @@ function render(){
   if (meta) meta.setAttribute('content', tier.bg);
 
   const today = todayKey();
-  const chain = data.habits.filter(h => !isCounter(h));   // toggles only, for the ~3-habit cap
-  const doneCount = data.habits.filter(h => has(h.days, today)).length;
-  const allDone = data.habits.length > 0 && doneCount === data.habits.length;
+  const habits = data.habits.filter(h => !isScore(h));    // the score is not a habit you complete
+  const chain = habits.filter(h => !isCounter(h));        // toggles only, for the ~3-habit cap
+  const doneCount = habits.filter(h => has(h.days, today)).length;
+  const allDone = habits.length > 0 && doneCount === habits.length;
   const p = perfectStreak();
 
   const subtitle = screen === 'today'
-    ? (data.habits.length === 0 ? 'Nothing set up yet'
+    ? (habits.length === 0 ? 'Nothing set up yet'
       : allDone ? (p >= 7 ? p+' clean days' : 'All recorded')
-      : doneCount+' of '+data.habits.length+' recorded')
+      : doneCount+' of '+habits.length+' recorded')
     : 'Set the cue, the anchor, and the floor';
 
   let body;
@@ -1424,11 +1555,12 @@ function render(){
       return '<div class="mCard"><div class="mTop">'+
         reorder +
         '<div style="flex:1;min-width:0">'+
-          '<div style="font-size:16px;font-weight:500;margin-bottom:'+((h.cue||h.minimum)?'5px':'0')+'">'+esc(h.name)+'</div>'+
+          '<div style="font-size:16px;font-weight:500;margin-bottom:'+((h.cue||h.minimum||isCounter(h)||isScore(h))?'5px':'0')+'">'+esc(h.name)+'</div>'+
           (h.cue     ? '<div class="mMeta">'+esc(h.cue)+'</div>' : '')+
           (h.minimum ? '<div class="mMeta">Floor: '+esc(h.minimum)+'</div>' : '')+
           (isCounter(h) ? '<div class="mMeta">'+typeLabel(h.type)+'</div>' : '')+
-          (!h.cue    ? '<div class="mWarn">No cue set</div>' : '')+
+          (isScore(h) ? '<div class="mMeta">Day score · computed from your habits</div>' : '')+
+          (!h.cue && !isCounter(h) && !isScore(h) ? '<div class="mWarn">No cue set</div>' : '')+
         '</div>'+
         '<button class="link" onclick="openEdit('+h.id+')">Edit</button>'+
         '<button class="link red" onclick="askRemove('+h.id+')">Remove</button>'+
