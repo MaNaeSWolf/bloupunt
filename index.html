@@ -141,15 +141,19 @@
   .tdot{width:9px;height:9px;border-radius:50%;background:transparent;border:1.5px solid var(--soft)}
   .bigScore{width:46px;height:38px;flex-shrink:0;border-radius:12px;display:grid;place-items:center;
     font-family:'Fraunces',Georgia,serif;font-size:22px;font-weight:500}
-  .sribbon{display:flex;gap:2px;margin:14px 0 0 44px}
+  /* Score rows use the FULL card width (no 44px tick indent) so the numbers get room. */
+  .sribbon{display:flex;gap:3px;margin:14px 0 0}
   .sslot{flex:1;min-width:0;display:grid;place-items:center}
-  .sbub{width:100%;max-width:22px;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;
-    font-size:9px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
-  .sbub.off{width:8px;height:8px;aspect-ratio:auto;background:var(--hair)}
-  .scell{width:16px;height:16px;border-radius:3px;display:grid;place-items:center;background:var(--hair);
-    font-size:8px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+  .sbub{width:100%;max-width:26px;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;
+    font-size:10px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+  .sbub.off{width:9px;height:9px;aspect-ratio:auto;background:var(--hair)}
+  .sgrid .wk{flex:1;min-width:0}
+  .scell{width:100%;aspect-ratio:1;max-height:22px;border-radius:4px;display:grid;place-items:center;
+    background:var(--hair);font-size:9px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
   .scell.future{background:transparent}
-  .months .mCol.wide{width:16px}
+  .sgrid{width:100%;max-width:322px}   /* 13 cols x 22px + gaps: keeps cells square on desktop */
+  .sgrid .months .mCol{flex:1;min-width:0;width:auto}
+  .sgrid .months{display:flex;gap:3px}
 
   .exp{margin-top:18px;padding-top:16px;border-top:1px solid var(--hair)}
   .detail{margin-bottom:10px}
@@ -1210,7 +1214,8 @@ function scoreRow(h){
   const tHas = dayHasLog(today);
   const tScore = dayScore(today);
 
-  const bubbles = windowDays(21).map(d => {
+  // 14 days, not 21: the bubbles carry a number, so they need the width to stay legible.
+  const bubbles = windowDays(14).map(d => {
     const k = keyFor(d), t = k===today;
     if (!dayHasLog(k)) return '<div class="sslot">'+(t?'<div class="tdot"></div>':'<div class="sbub off"></div>')+'</div>';
     const v = dayScore(k);
@@ -1239,19 +1244,22 @@ function scoreRow(h){
   '</div>';
 }
 
+// 13 weeks (~3 months) of numbered cells, sized by flex so the grid always fits the
+// card - no sideways scrolling. Fewer weeks than a habit grid because each cell
+// carries a number and has to stay readable.
 function scoreGrid(A){
   const end = midnight();
   const dow = (end.getDay() + 6) % 7;
   const weekEnd = new Date(end); weekEnd.setDate(end.getDate() + (6 - dow));
   const weeks = [];
-  for (let w=17; w>=0; w--){ const col=[]; for (let r=0;r<7;r++){ const d=new Date(weekEnd); d.setDate(weekEnd.getDate()-w*7-(6-r)); col.push(d);} weeks.push(col); }
+  for (let w=12; w>=0; w--){ const col=[]; for (let r=0;r<7;r++){ const d=new Date(weekEnd); d.setDate(weekEnd.getDate()-w*7-(6-r)); col.push(d);} weeks.push(col); }
   const now = new Date();
   const change = weeks.map((w,i)=> i===0 || weeks[i-1][0].getMonth() !== w[0].getMonth());
   const months = weeks.map((w,i)=>{
-    if (!change[i]) return '<div class="mCol wide"></div>';
+    if (!change[i]) return '<div class="mCol"></div>';
     let seg=1; for (let j=i+1;j<weeks.length && !change[j];j++) seg++;
     const show = (i+seg)>=weeks.length || seg>=3;
-    return '<div class="mCol wide">'+(show?'<span>'+MONTHS[w[0].getMonth()]+'</span>':'')+'</div>';
+    return '<div class="mCol">'+(show?'<span>'+MONTHS[w[0].getMonth()]+'</span>':'')+'</div>';
   }).join('');
   const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
     const future = d > now, k = keyFor(d);
@@ -1260,7 +1268,7 @@ function scoreGrid(A){
     const v = dayScore(k);
     return '<div class="scell" style="background:'+bandColour(v,A)+';color:'+bandInk(v,A)+'">'+v+'</div>';
   }).join('') + '</div>').join('');
-  return '<div class="gridWrap"><div class="gridIn"><div class="months">'+months+'</div><div class="weeks">'+cols+'</div></div></div>';
+  return '<div class="sgrid"><div class="months">'+months+'</div><div class="weeks">'+cols+'</div></div>';
 }
 
 function habitRow(h){

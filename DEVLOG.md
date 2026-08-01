@@ -368,6 +368,21 @@ button ("Score") pushed the editor row past its card. Both made shrink-to-fit:
 `.sbub` is now `width:100%; max-width:22px; aspect-ratio:1` in a `min-width:0` slot,
 and `.segBtn` is `flex:1 1 0; min-width:0` with smaller padding/font. → `sw.js v13`.
 
+### 2026-08-01 (later still) — Properly rescale the score card
+v13 stopped the page overflowing but the score card was still wrong: bubbles were
+squeezed to 10px while holding two-digit numbers (text spilling out of the circle),
+and the score's month grid was 339px inside a 290px card, so it scrolled sideways.
+Root cause was cramming 21 bubbles / 18 week-columns into a phone.
+- Score rows now use the **full card width** (dropped the 44px tick indent — a score
+  card has no tick to align to).
+- Week row shows **14 days** instead of 21 → bubbles are 18px on a phone, 26px capped
+  on desktop, and the numbers fit.
+- `scoreGrid` shows **13 weeks (~3 months)** instead of 18, laid out with flex
+  (`.sgrid`, no `gridWrap`) so it always fits — cells are 20px on mobile, 22px square
+  on desktop (`max-width:322px` keeps them square rather than stretched).
+Measured at 360px and 619px: no page overflow, no element past the card edge, no text
+overflow in any bubble or cell. → `sw.js v14`.
+
 ---
 
 ## Still to do / open items
