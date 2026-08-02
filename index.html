@@ -624,36 +624,60 @@ function counterAvg(h){
   return n ? sum/n : 0;
 }
 // Band index -2..+2: where a value sits vs the average, in 20%-of-average steps.
+// The step never drops below 1 - counters are whole numbers, and without a floor a
+// near-zero average makes every single point read as a huge deviation.
 function bandIndex(v, A){
-  const step = 0.2 * Math.abs(A);
-  if (step < 1e-9) return 0;                        // not enough history to place it
+  if (!isFinite(A)) return 0;
+  const step = Math.max(0.2 * Math.abs(A), 1);
   const u = (v - A) / step;
   return u >= 0.5 ? 2 : u >= -0.5 ? 1 : u >= -1.5 ? 0 : u >= -2.5 ? -1 : -2;
 }
-function bandColour(v, A){ return BANDS[bandIndex(v, A) + 2]; }
+
+// Typical magnitude of a +/- habit's days (trailing 21 logged days), floor 1.
+function counterMag(h){
+  const days = h.days || {};
+  let sum = 0, n = 0; const c = midnight();
+  for (let i=0;i<21;i++){ const k = keyFor(c); if (has(days,k)){ sum += Math.abs(days[k]); n++; } c.setDate(c.getDate()-1); }
+  return Math.max(1, n ? sum/n : 0);
+}
+
+// A day's band for a habit. For +/- habits ZERO IS THE ANCHOR, not the average:
+// 0 is neutral (you logged, nothing net happened), positive is good, negative is bad,
+// scaled by how big your typical day is. Plus/minus-only habits never straddle zero,
+// so those stay judged against their own average.
+function habitBand(h, v){
+  if (h.type === 'plusminus'){
+    const b = Math.round(v / counterMag(h));
+    return Math.max(-2, Math.min(2, b));
+  }
+  return bandIndex(v, counterAvg(h));
+}
+const bandColourIdx = i => BANDS[i + 2];
 // Text colour that stays legible on its band (white on the bold ends, ink otherwise).
-function bandInk(v, A){ return Math.abs(bandIndex(v, A)) >= 2 ? '#FFFFFF' : '#3D3B37'; }
+const bandInkIdx    = i => Math.abs(i) >= 2 ? '#FFFFFF' : '#3D3B37';
+function bandColour(v, A){ return bandColourIdx(bandIndex(v, A)); }
+function bandInk(v, A){ return bandInkIdx(bandIndex(v, A)); }
 
 function counterScale(h){
   const days = h.days || {};
-  const A = counterAvg(h);
   return d => {
     const k = keyFor(d);
     if (!has(days, k)) return unloggedShade(h, d);
-    return bandColour(days[k], A);                 // colour each logged day by its own value
+    return bandColourIdx(habitBand(h, days[k]));    // same band the score uses
   };
 }
 
 /* ═══════════════ DAY SCORE ═══════════════
    A computed card (type 'score', at most one). Each day sums every habit's points:
    toggle +2 when marked; counter +1 just for logging, plus its band (-2..+2). So
-   showing up beats not, even on a bad day. */
+   showing up beats not, even on a bad day - and a +/- habit that nets 0 scores
+   exactly +1, because zero is neutral, not "below average". */
 function dayScore(k){
   let s = 0;
   for (const h of data.habits){
     if (isScore(h)) continue;
     if (isCounter(h)){
-      if (has(h.days, k)) s += 1 + bandIndex(h.days[k], counterAvg(h));
+      if (has(h.days, k)) s += 1 + habitBand(h, h.days[k]);
     } else if (has(h.days, k)) s += 2;             // toggle marked
   }
   return s;

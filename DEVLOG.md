@@ -383,6 +383,25 @@ Root cause was cramming 21 bubbles / 18 week-columns into a phone.
 Measured at 360px and 619px: no page overflow, no element past the card edge, no text
 overflow in any bubble or cell. → `sw.js v14`.
 
+### 2026-08-01 (later) — Fix: a +/- habit at zero scored negative
+Reported: a `+/-` habit logged down to −1 then back to 0 made the day score −1; it
+should be +1 (the logging point, nothing net gained or lost).
+**Cause:** bands were measured in steps of *20% of the average*. A `+/-` habit hovers
+near zero, so the average is tiny, the step becomes a fraction of a point, and a plain
+0 reads as many steps "below average" → bottom band (−2), cancelling the +1.
+**Fix, two parts:**
+- `bandIndex` now floors the step at **1** — counters are whole numbers, so a
+  near-zero average can no longer make one point look like a huge deviation.
+- New `habitBand(h, v)`: for **`plusminus` habits zero is the anchor, not the
+  average** — 0 is neutral, positive good, negative bad, scaled by `counterMag()`
+  (typical |value| over 21 days, floor 1). `plus`/`minus` habits never straddle zero,
+  so they stay judged against their own average.
+Both the score and the cell colours now use the same `habitBand`, so a 0 day reads
+neutral instead of deep red. Verified: `+/-` bands −3→−2, −1→−1, **0→0**, +1→+1,
++3→+2 (scores −1, 0, **1**, 2, 3 — monotonic, no inversion); `plus` avg 10 still puts
+9 in the green band and 1 at −1; `minus` still rewards fewer slips; toggle still +2.
+→ `sw.js v15`.
+
 ---
 
 ## Still to do / open items
