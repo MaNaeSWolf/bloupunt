@@ -419,11 +419,21 @@ Worked example — positives +2/+4/+6 (avg 4, half 2), negatives -1/-3 (avg -2, 
 `+1`→2, `+2`→3, `+6`→3, `0`→1, `-1`→-1, `-3`→-1. First-ever day with no history on a
 side lands in that side's inner band.
 
-**Known consequence:** because the split is at *half* the side average, a habit that
-only ever moves by ±1 has a side average of ±1, a halfway mark of ±0.5, and so every
-non-zero day clears it — such a habit only ever uses bands -2/0/+2 (scores -1/1/3) and
-the soft middle colours never appear on it. Moving the split to the side average
-itself would restore them; noted as the user's call. → `sw.js v16`.
+(v16 first put the split at *half* the side average; corrected below.) → `sw.js v16`.
+
+### 2026-08-01 (later) — Correction: the side average is the top of the middle band
+The half-average split was wrong. Each side's average is the **top of its middle
+band**, not the midpoint: values up to and including the average are the middle band
+(±1), values past it are the outer band (±2).
+
+Negative average -3: days -1, -2, -3 → band -1 → **day sum 0**; -4 or worse → band -2
+→ **day sum -1**. Positive average +3: +1, +2, +3 → band +1 → **day sum 2**; +4 or
+more → band +2 → **day sum 3**. Zero is unchanged: band 0, **day sum 1**.
+
+This also removes the v16 consequence — a ±1 habit now has its ±1 days sitting *at*
+the side average, so they land in the middle band (day sums 0 / 1 / 2) and the soft
+middle colours are reachable again. A side with no history yet uses its middle band.
+`plus`/`minus`-only habits and toggles are untouched. → `sw.js v17`.
 
 ---
 

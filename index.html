@@ -652,18 +652,19 @@ function sideAvgs(h){
 }
 
 // A day's band for a habit. A +/- habit gets THREE separate calculations:
-//   0        -> neutral (band 0). You logged; nothing net happened.
+//   0        -> neutral (band 0). You logged; nothing net happened.  Day sum +1.
 //   positive -> against the average of your positive days only
 //   negative -> against the average of your negative days only
-// Each side owns two bands, so its average is split in half: past the halfway mark is
-// the outer band, short of it the inner one. Plus/minus-only habits never straddle
-// zero, so those stay judged against their single average.
+// Each side's average is the TOP OF ITS MIDDLE BAND: up to and including the average
+// is the middle band (+-1), past it is the outer band (+-2). So with a negative
+// average of -3, days -1..-3 score 0 for the day and -4 or worse scores -1.
+// Plus/minus-only habits never straddle zero, so they stay on their single average.
 function habitBand(h, v){
   if (h.type === 'plusminus'){
     if (!v) return 0;
     const A = sideAvgs(h);
-    if (v > 0){ const half = A.pos / 2; return (half > 0 && v >= half) ? 2 : 1; }
-    const half = A.neg / 2;             return (half < 0 && v <= half) ? -2 : -1;
+    if (v > 0) return (A.pos > 0 && v > A.pos) ? 2 : 1;
+    return (A.neg < 0 && v < A.neg) ? -2 : -1;
   }
   return bandIndex(v, counterAvg(h));
 }
