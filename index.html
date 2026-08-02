@@ -633,22 +633,37 @@ function bandIndex(v, A){
   return u >= 0.5 ? 2 : u >= -0.5 ? 1 : u >= -1.5 ? 0 : u >= -2.5 ? -1 : -2;
 }
 
-// Typical magnitude of a +/- habit's days (trailing 21 logged days), floor 1.
-function counterMag(h){
+// Trailing-21-day average of the POSITIVE days and of the NEGATIVE days, kept apart.
+// A +/- habit's wins and slips are two different populations; blending them gives an
+// average that represents neither.
+function sideAvgs(h){
   const days = h.days || {};
-  let sum = 0, n = 0; const c = midnight();
-  for (let i=0;i<21;i++){ const k = keyFor(c); if (has(days,k)){ sum += Math.abs(days[k]); n++; } c.setDate(c.getDate()-1); }
-  return Math.max(1, n ? sum/n : 0);
+  let ps=0, pn=0, ns=0, nn=0;
+  const c = midnight();
+  for (let i=0;i<21;i++){
+    const k = keyFor(c);
+    if (has(days, k)){
+      const v = days[k];
+      if (v > 0){ ps += v; pn++; } else if (v < 0){ ns += v; nn++; }
+    }
+    c.setDate(c.getDate()-1);
+  }
+  return { pos: pn ? ps/pn : 0, neg: nn ? ns/nn : 0 };
 }
 
-// A day's band for a habit. For +/- habits ZERO IS THE ANCHOR, not the average:
-// 0 is neutral (you logged, nothing net happened), positive is good, negative is bad,
-// scaled by how big your typical day is. Plus/minus-only habits never straddle zero,
-// so those stay judged against their own average.
+// A day's band for a habit. A +/- habit gets THREE separate calculations:
+//   0        -> neutral (band 0). You logged; nothing net happened.
+//   positive -> against the average of your positive days only
+//   negative -> against the average of your negative days only
+// Each side owns two bands, so its average is split in half: past the halfway mark is
+// the outer band, short of it the inner one. Plus/minus-only habits never straddle
+// zero, so those stay judged against their single average.
 function habitBand(h, v){
   if (h.type === 'plusminus'){
-    const b = Math.round(v / counterMag(h));
-    return Math.max(-2, Math.min(2, b));
+    if (!v) return 0;
+    const A = sideAvgs(h);
+    if (v > 0){ const half = A.pos / 2; return (half > 0 && v >= half) ? 2 : 1; }
+    const half = A.neg / 2;             return (half < 0 && v <= half) ? -2 : -1;
   }
   return bandIndex(v, counterAvg(h));
 }

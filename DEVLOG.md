@@ -402,6 +402,29 @@ neutral instead of deep red. Verified: `+/-` bands −3→−2, −1→−1, **0
 9 in the green band and 1 at −1; `minus` still rewards fewer slips; toggle still +2.
 → `sw.js v15`.
 
+### 2026-08-01 (later) — +/- habits: separate positive and negative averages
+Refining the above on request. A `+/-` habit now gets **three separate calculations**,
+on top of the +1 for logging:
+- **0** → band 0 (score +1). Zero is neutral: you logged, nothing net happened.
+- **positive days** → judged against the average of the *positive* days only (21d)
+- **negative days** → judged against the average of the *negative* days only (21d)
+
+Wins and slips are two different populations; one blended average represents neither.
+Each side owns two bands, so its average is **split in half**: past the halfway mark
+is the outer band (±2), short of it the inner one (±1). `sideAvgs(h)` replaces
+`counterMag()`. `plus`/`minus`-only habits never straddle zero and are unchanged
+(still `bandIndex` against their single average).
+
+Worked example — positives +2/+4/+6 (avg 4, half 2), negatives -1/-3 (avg -2, half -1):
+`+1`→2, `+2`→3, `+6`→3, `0`→1, `-1`→-1, `-3`→-1. First-ever day with no history on a
+side lands in that side's inner band.
+
+**Known consequence:** because the split is at *half* the side average, a habit that
+only ever moves by ±1 has a side average of ±1, a halfway mark of ±0.5, and so every
+non-zero day clears it — such a habit only ever uses bands -2/0/+2 (scores -1/1/3) and
+the soft middle colours never appear on it. Moving the split to the side average
+itself would restore them; noted as the user's call. → `sw.js v16`.
+
 ---
 
 ## Still to do / open items
