@@ -62,6 +62,15 @@
   .row.done{border-color:#CBDCCD}
   .row.warn{border-color:var(--amber);background:var(--amberBg)}
   .row.alarm{border:1.5px solid var(--clay);background:var(--clayBg)}
+  .row.m1{border-color:var(--clay)}
+  .row.m7{border-width:2px;border-color:var(--clay)}
+  .row.m21{border-width:3px;border-color:var(--clay)}
+  .row.atRisk{border:2px solid var(--gold);animation:stake 2.6s ease-in-out infinite}
+  @keyframes stake{0%,100%{box-shadow:0 0 0 0 rgba(176,141,63,0)}
+    50%{box-shadow:0 0 0 5px rgba(176,141,63,.20)}}
+  .riskBar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 0;padding:9px 11px;
+    background:rgba(176,141,63,.10);border-radius:12px;font-size:12.5px;color:var(--gold);
+    font-weight:500;line-height:1.45}
 
   .top{display:flex;align-items:center;gap:14px}
   .tick{width:30px;height:30px;flex-shrink:0;border-radius:50%;background:transparent;
@@ -239,6 +248,7 @@
     .confetti,.breath{display:none}
     .sheet{animation:none}
     .nslot:hover .node,.cell:hover{transform:none}
+    .row.atRisk{animation:none}
   }
 </style>
 </head>
@@ -606,12 +616,15 @@ function unloggedShade(h, d){
 // against the habit's average value, in 20%-of-average steps (higher is always
 // better, so avoidance counters with a negative average colour correctly too).
 // e.g. average 10, day 9 -> one step below -> lands green.
-// Soft in the middle, bold at the ends, so the five steps read as five (not 2+2).
-const BANDS = ['#B06A4F','#DDB4A4','#EDE9E2','#AFC7B2','#5E8163']; // -2 -1 0 +1 +2
+// Worst -> best. No red anywhere: a logged day is never a failure, it is you
+// noticing. Red is reserved for not showing up at all (the missed-day border).
+const BANDS = ['#C9A961','#DFC98F','#EDE9E2','#AFC7B2','#5E8163']; // amber, gold, neutral, sage, deep green
+const bandColourIdx = i => BANDS[Math.max(0, Math.min(4, i))];
+// Text colour that stays legible on its band (white on the deep green only).
+const bandInkIdx    = i => i >= 4 ? '#FFFFFF' : '#3D3B37';
 
-// Reference average: the mean of LOGGED days over the trailing 21 days only. Missed
-// days are skipped (not zeros), so a new habit's average moves fast, then a rolling
-// three-week window keeps it stable without old history dragging it forever.
+// Mean of LOGGED days over the trailing 21 days (missed days skipped). Only used for
+// the "7-day avg"-style readouts now - it has no bearing on the score.
 function counterAvg(h){
   const days = h.days || {};
   let sum = 0, n = 0;
@@ -623,87 +636,97 @@ function counterAvg(h){
   }
   return n ? sum/n : 0;
 }
-// Band index -2..+2: where a value sits vs the average, in 20%-of-average steps.
-// The step never drops below 1 - counters are whole numbers, and without a floor a
-// near-zero average makes every single point read as a huge deviation.
-function bandIndex(v, A){
-  if (!isFinite(A)) return 0;
-  const step = Math.max(0.2 * Math.abs(A), 1);
-  const u = (v - A) / step;
-  return u >= 0.5 ? 2 : u >= -0.5 ? 1 : u >= -1.5 ? 0 : u >= -2.5 ? -1 : -2;
-}
 
-// Trailing-21-day average of the POSITIVE days and of the NEGATIVE days, kept apart.
-// A +/- habit's wins and slips are two different populations; blending them gives an
-// average that represents neither.
-function sideAvgs(h){
-  const days = h.days || {};
-  let ps=0, pn=0, ns=0, nn=0;
+// Colour is DESCRIPTIVE ONLY - it never touches the score. A day is placed in one of
+// five 20% groups against the habit's own last 21 logged days. Ties share a group.
+function quintiler(values){
+  const n = values.length;
+  if (!n) return () => 2;                       // nothing to compare against yet
+  return v => {
+    let below = 0, equal = 0;
+    for (const x of values){ if (x < v) below++; else if (x === v) equal++; }
+    const p = (below + equal/2) / n;            // mid-rank percentile, tie-safe
+    return Math.max(0, Math.min(4, Math.floor(p * 5)));
+  };
+}
+function last21(h){
+  const days = h.days || {}, out = [];
   const c = midnight();
-  for (let i=0;i<21;i++){
-    const k = keyFor(c);
-    if (has(days, k)){
-      const v = days[k];
-      if (v > 0){ ps += v; pn++; } else if (v < 0){ ns += v; nn++; }
-    }
-    c.setDate(c.getDate()-1);
-  }
-  return { pos: pn ? ps/pn : 0, neg: nn ? ns/nn : 0 };
+  for (let i=0;i<21;i++){ const k = keyFor(c); if (has(days,k)) out.push(days[k]); c.setDate(c.getDate()-1); }
+  return out;
 }
-
-// A day's band for a habit. A +/- habit gets THREE separate calculations:
-//   0        -> neutral (band 0). You logged; nothing net happened.  Day sum +1.
-//   positive -> against the average of your positive days only
-//   negative -> against the average of your negative days only
-// Each side's average is the TOP OF ITS MIDDLE BAND: up to and including the average
-// is the middle band (+-1), past it is the outer band (+-2). So with a negative
-// average of -3, days -1..-3 score 0 for the day and -4 or worse scores -1.
-// Plus/minus-only habits never straddle zero, so they stay on their single average.
-function habitBand(h, v){
-  if (h.type === 'plusminus'){
-    if (!v) return 0;
-    const A = sideAvgs(h);
-    if (v > 0) return (A.pos > 0 && v > A.pos) ? 2 : 1;
-    return (A.neg < 0 && v < A.neg) ? -2 : -1;
-  }
-  return bandIndex(v, counterAvg(h));
-}
-const bandColourIdx = i => BANDS[i + 2];
-// Text colour that stays legible on its band (white on the bold ends, ink otherwise).
-const bandInkIdx    = i => Math.abs(i) >= 2 ? '#FFFFFF' : '#3D3B37';
-function bandColour(v, A){ return bandColourIdx(bandIndex(v, A)); }
-function bandInk(v, A){ return bandInkIdx(bandIndex(v, A)); }
 
 function counterScale(h){
   const days = h.days || {};
+  const q = quintiler(last21(h));
   return d => {
     const k = keyFor(d);
     if (!has(days, k)) return unloggedShade(h, d);
-    return bandColourIdx(habitBand(h, days[k]));    // same band the score uses
+    return bandColourIdx(q(days[k]));
   };
 }
 
+/* ═══════════════ CHAIN TIERS ═══════════════
+   Points come from consistency alone, never from how well the day went. Each tier
+   takes twice as long as the last, so the ladder climbs slowly and a high tier means
+   something. A single missed day costs nothing; every SECOND consecutive miss drops
+   one tier, knocking the chain back to the start of the tier below. */
+const TIER_DAYS = (() => {
+  const t = [0, 14, 30];                        // start, 14 days, 1 month
+  for (let d = 60; d <= 60000; d *= 2) t.push(d);   // 2m, 4m, 8m, 16m, 32m...
+  return t;
+})();
+const tierOf = chain => { let i = 0; while (i+1 < TIER_DAYS.length && chain >= TIER_DAYS[i+1]) i++; return i; };
+const tierPoints = chain => tierOf(chain) + 1;
+
+// Replay a habit's whole history once, returning { points:{dayKey:n}, chain, tier }.
+// Cached per render pass - render() clears it.
+let _chainCache = {};
+function chainRun(h){
+  if (_chainCache[h.id]) return _chainCache[h.id];
+  const days = h.days || {}, paused = data.paused || {};
+  const points = {};
+  let chain = 0, missRun = 0;
+  const start = habitStart(h), end = midnight();
+  if (start){
+    for (const d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
+      const k = keyFor(d);
+      if (has(days, k)){ chain++; missRun = 0; points[k] = tierPoints(chain); }
+      else if (paused[k]){ /* bridges: neither builds nor breaks */ }
+      else if (k === keyFor(end)){ /* today is grace until tomorrow */ }
+      else {
+        missRun++;
+        if (missRun % 2 === 0){                 // every second consecutive miss
+          const t = tierOf(chain);
+          chain = t > 0 ? TIER_DAYS[t-1] : 0;   // back to the start of the tier below
+        }
+      }
+    }
+  }
+  const res = { points, chain, tier: tierPoints(chain) };
+  _chainCache[h.id] = res;
+  return res;
+}
+
 /* ═══════════════ DAY SCORE ═══════════════
-   A computed card (type 'score', at most one). Each day sums every habit's points:
-   toggle +2 when marked; counter +1 just for logging, plus its band (-2..+2). So
-   showing up beats not, even on a bad day - and a +/- habit that nets 0 scores
-   exactly +1, because zero is neutral, not "below average". */
+   A computed card (type 'score', at most one). Every habit logged that day is worth
+   its chain tier - 1 point to start, more as the chain lengthens. Nothing else feeds
+   it: a counter's size, sign and colour are irrelevant. Showing up is the whole
+   score, and staying shown-up is what makes it grow. */
 function dayScore(k){
   let s = 0;
   for (const h of data.habits){
     if (isScore(h)) continue;
-    if (isCounter(h)){
-      if (has(h.days, k)) s += 1 + habitBand(h, h.days[k]);
-    } else if (has(h.days, k)) s += 2;             // toggle marked
+    s += chainRun(h).points[k] || 0;
   }
   return s;
 }
 const dayHasLog = k => data.habits.some(h => !isScore(h) && has(h.days, k));
-// The score's own reference average: mean of scored days over the trailing 21 days.
-function scoreAvg(){
-  let sum = 0, n = 0; const c = midnight();
-  for (let i=0;i<21;i++){ const k = keyFor(c); if (dayHasLog(k)){ sum += dayScore(k); n++; } c.setDate(c.getDate()-1); }
-  return n ? sum/n : 0;
+// The score's own last-21-day sample, for colouring only.
+function scoreSample(){
+  const out = []; const c = midnight();
+  for (let i=0;i<21;i++){ const k = keyFor(c); if (dayHasLog(k)) out.push(dayScore(k)); c.setDate(c.getDate()-1); }
+  return out;
 }
 
 function statsFor(h){
@@ -1152,6 +1175,25 @@ function fullGrid(h){
     '</div></div>';
 }
 
+// Row state from missed days. The red border thickens the longer you have been away.
+// The gold "at risk" treatment fires when the NEXT miss would cost a tier - misses are
+// penalised in pairs, so an odd miss count means the next one lands.
+function rowRisk(h){
+  const s = statsFor(h);
+  const tier = chainRun(h).tier;
+  const atRisk = (s.missed % 2 === 1) && tier >= 2 && !has(h.days, todayKey());
+  const miss = s.missed >= 21 ? ' m21' : s.missed >= 7 ? ' m7' : s.missed >= 1 ? ' m1' : '';
+  return { atRisk, tier, cls: miss + (atRisk ? ' atRisk' : '') };
+}
+function riskBlock(r){
+  if (!r.atRisk) return '';
+  const drop = r.tier - 1;
+  return '<div class="riskBar">'+
+    '<span>Chain at risk — one more missed day drops this to '+drop+' point'+(drop===1?'':'s')+' a day.</span>'+
+    '<button class="chipBtn" onclick="togglePause()">Pause instead</button>'+
+  '</div>';
+}
+
 // Edit chip for one day, opened by tapping a strip cell. The deliberate,
 // undoable way to backfill or fix a past day (and to correct an accidental tap).
 function dayChip(h){
@@ -1200,7 +1242,8 @@ function counterRow(h, today){
   const alarm = !done && s.missed >= 2;
   let mark = null;
   for (const m of STREAK_MARKS) if (s.streak >= m.d) mark = m;
-  const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'');
+  const risk = rowRisk(h);
+  const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls;
   const pill = (mark && mark.d >= 21)
     ? '<span class="pill'+(mark.d>=90?' gold':'')+'">'+mark.d+'d</span>' : '';
 
@@ -1241,7 +1284,7 @@ function counterRow(h, today){
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
-    chainStrip(h) + dayChip(h) + expBlock +
+    riskBlock(risk) + chainStrip(h) + dayChip(h) + expBlock +
   '</div>';
 }
 
@@ -1250,7 +1293,7 @@ function counterRow(h, today){
 function scoreRow(h){
   const open = expanded === h.id;
   const today = todayKey();
-  const A = scoreAvg();
+  const q = quintiler(scoreSample());
   const tHas = dayHasLog(today);
   const tScore = dayScore(today);
 
@@ -1259,7 +1302,8 @@ function scoreRow(h){
     const k = keyFor(d), t = k===today;
     if (!dayHasLog(k)) return '<div class="sslot">'+(t?'<div class="tdot"></div>':'<div class="sbub off"></div>')+'</div>';
     const v = dayScore(k);
-    return '<div class="sslot"><div class="sbub" style="background:'+bandColour(v,A)+';color:'+bandInk(v,A)+'">'+v+'</div></div>';
+    const bi = q(v);
+    return '<div class="sslot"><div class="sbub" style="background:'+bandColourIdx(bi)+';color:'+bandInkIdx(bi)+'">'+v+'</div></div>';
   }).join('');
 
   let expBlock='';
@@ -1269,12 +1313,12 @@ function scoreRow(h){
     expBlock = '<div class="exp"><div class="stats">'+
       '<div><div class="sl">Today</div><div class="sv">'+(tHas?tScore:'—')+'</div></div>'+
       '<div><div class="sl">30-day total</div><div class="sv">'+tot+'</div></div>'+
-      '</div>'+ scoreGrid(A) + '</div>';
+      '</div>'+ scoreGrid(q) + '</div>';
   }
 
   return '<div class="row score">'+
     '<div class="top">'+
-      '<div class="bigScore" style="background:'+(tHas?bandColour(tScore,A):'var(--faint)')+';color:'+(tHas?bandInk(tScore,A):'var(--soft)')+'">'+(tHas?tScore:'–')+'</div>'+
+      '<div class="bigScore" style="background:'+(tHas?bandColourIdx(q(tScore)):'var(--faint)')+';color:'+(tHas?bandInkIdx(q(tScore)):'var(--soft)')+'">'+(tHas?tScore:'–')+'</div>'+
       '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
         '<div class="nameLine"><span class="hname">Score</span></div>'+
       '</button>'+
@@ -1287,7 +1331,7 @@ function scoreRow(h){
 // 13 weeks (~3 months) of numbered cells, sized by flex so the grid always fits the
 // card - no sideways scrolling. Fewer weeks than a habit grid because each cell
 // carries a number and has to stay readable.
-function scoreGrid(A){
+function scoreGrid(q){
   const end = midnight();
   const dow = (end.getDay() + 6) % 7;
   const weekEnd = new Date(end); weekEnd.setDate(end.getDate() + (6 - dow));
@@ -1306,7 +1350,8 @@ function scoreGrid(A){
     if (future) return '<div class="scell future"></div>';
     if (!dayHasLog(k)) return '<div class="scell"></div>';
     const v = dayScore(k);
-    return '<div class="scell" style="background:'+bandColour(v,A)+';color:'+bandInk(v,A)+'">'+v+'</div>';
+    const bi = q(v);
+    return '<div class="scell" style="background:'+bandColourIdx(bi)+';color:'+bandInkIdx(bi)+'">'+v+'</div>';
   }).join('') + '</div>').join('');
   return '<div class="sgrid"><div class="months">'+months+'</div><div class="weeks">'+cols+'</div></div>';
 }
@@ -1324,7 +1369,8 @@ function habitRow(h){
   let mark = null;
   for (const m of STREAK_MARKS) if (s.streak >= m.d) mark = m;
 
-  const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'');
+  const risk = rowRisk(h);
+  const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls;
 
   const streakLine = alarm ? 'Missed '+s.missed+' in a row'
     : warn ? 'Missed yesterday \u2014 don\u2019t miss twice'
@@ -1378,7 +1424,7 @@ function habitRow(h){
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
-    floorBlock + chainStrip(h) + dayChip(h) + expBlock +
+    floorBlock + riskBlock(risk) + chainStrip(h) + dayChip(h) + expBlock +
   '</div>';
 }
 
@@ -1548,6 +1594,7 @@ function pausePanel(){
 }
 
 function render(){
+  _chainCache = {};                 // chain/point replay is per-render
   const tier = currentTier();
   document.documentElement.style.setProperty('--bg', tier.bg);
   document.documentElement.style.setProperty('--tint', tier.tint);

@@ -435,6 +435,64 @@ the side average, so they land in the middle band (day sums 0 / 1 / 2) and the s
 middle colours are reachable again. A side with no history yet uses its middle band.
 `plus`/`minus`-only habits and toggles are untouched. → `sw.js v17`.
 
+### 2026-08-01 (later) — Scoring rebuilt: consistency only, performance is colour
+The relative-to-average scoring was the wrong abstraction and kept generating edge
+cases (near-zero averages, side splits, band boundaries, slump-inflation). Its real
+flaw: **the yardstick moved with you** — a slump lowered the bar so mediocre days
+scored well, and improvement raised it so the same effort scored worse. A number that
+can't reliably go up through effort can't be a goal, and a trend on a moving baseline
+is uninterpretable. Replaced wholesale.
+
+**Points now come from consistency alone.** Each habit logged that day is worth its
+chain tier. Size, sign and colour of a counter have zero effect — logging −5 and +5
+earn the same. Day score = the tally across habits.
+
+| tier | points | at |
+|---|---|---|
+| 1 | 1 | first logged day |
+| 2 | 2 | 14 days |
+| 3 | 3 | 30 days (1 month) |
+| 4 | 4 | 60 days (2 months) |
+| 5 | 5 | 120 days (4 months) |
+| 6 | 6 | 240 days (8 months) |
+| 7 | 7 | 480 days (16 months) |
+
+Each tier takes **twice as long as the last**, so the ladder climbs slowly and a high
+tier means something. `TIER_DAYS` generates it by doubling from 60.
+
+**Misses are penalised in pairs.** One missed day costs nothing; every *second*
+consecutive miss drops one tier, knocking the chain back to the start of the tier
+below (so a 6→5 drop costs ~120 days of rebuild, not the whole chain). Rationale: a
+full reset after months of work is the best-documented cause of abandonment in streak
+apps, and it collides with the app's own "one miss is noise" rule. Paused days bridge;
+today stays grace. `chainRun(h)` replays a habit's history once per render (cached in
+`_chainCache`, cleared at the top of `render()`) and returns per-day points — still
+fully derived from the logs, so nothing new is stored and sync is untouched.
+
+**Colour is now descriptive only** and never touches the score, so a moving yardstick
+is harmless there. A logged day is placed in one of five 20% groups against the
+habit's own last 21 logged days (`quintiler`, mid-rank percentile so ties share a
+group). Palette is **deep green → sage → neutral → soft gold → amber** — no red on any
+logged day, because logging a bad day is a success of the tracking behaviour, not a
+failure. Red is now reserved exclusively for not showing up.
+
+**Missed-day border** escalates on the row: 1px red at 1+ misses, 2px at 7+, 3px at
+21+. **At-risk highlight** fires when the *next* miss would cost a tier (odd miss
+count, tier ≥ 2, not yet logged today): gold 2px border, a slow `stake` pulse
+(disabled under `prefers-reduced-motion`), and an inline **Pause instead** button so
+the chain can be protected in one tap. Rainbow/flashing was rejected — gold already
+means "you've built something rare" here and stays inside the palette.
+
+Rejected in the same round: a periodic card shake (ambient nagging trains you to stop
+opening the app, and it fights the calm aesthetic), auto-sorting struggling habits to
+the top (moving cards adds friction to a glance that is itself a habit), and a library
+of quoted *Atomic Habits* lines (copyright, and it would dilute the app's own voice).
+
+Verified: ladder exact at every boundary; 2 misses = −1 tier with the chain knocked to
+the tier below, 4 = −2, 6 = −3; at-risk fires only on odd miss counts; all five bands
+render with no red; a day score of **98 fits** the week bubble (13px of text in 18px)
+and the month cell (11.7px in 20px) at 360px with zero overflow. → `sw.js v18`.
+
 ---
 
 ## Still to do / open items
