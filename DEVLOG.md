@@ -493,6 +493,45 @@ the tier below, 4 = −2, 6 = −3; at-risk fires only on odd miss counts; all f
 render with no red; a day score of **98 fits** the week bubble (13px of text in 18px)
 and the month cell (11.7px in 20px) at 360px with zero overflow. → `sw.js v18`.
 
+### 2026-08-07 — New habit type: first time of day
+For quitting something by pushing it later each day. Logs **the first time the thing
+happened**, as minutes since local midnight, so `days: {dateKey: number}` is unchanged
+and sync/merge/import/export need no migration. `NONE_MIN` (1440) is the sentinel for
+"it never happened today" — it sorts as the latest possible moment, so it is both the
+best day and the top of the graph, and it is pinned to the top colour band regardless
+of how the rest of the fortnight fell.
+
+**Why a sentinel was needed:** without it the *best possible day* (never doing the
+thing) has nothing to log, so it would earn no points and break the chain. Now the row
+offers two spaced, visually distinct buttons — **Log now** (clay, one tap stamps the
+clock) and **Didn't happen** (sage). First log wins, since it is the *first* time;
+corrections go through the day chip, which gains a native `<input type="time">`.
+
+**Drawn as a dot-and-line graph** (`timeGraph`) rather than the ribbon. The vertical
+scale is the habit's own observed range over the window — lowest logged time is the
+floor, latest is the roof — because nothing happens at 3am and there is no point
+plotting empty hours. Consecutive logged days are joined; a miss breaks the line, a
+pause bridges it. Dot height is **goodness, not raw time**, so an improving habit
+always climbs whichever direction is better. Colour uses the same five bands.
+
+**Direction is now general** (`dir: 'up' | 'down'`, `isDown`), exposed on every
+counting type rather than special-cased for time: *later/earlier is better* for time,
+*more/less is better* for counters. It inverts the colour ranking and the graph height.
+
+Scoring is untouched — a time habit earns its chain tier for being logged, like
+everything else, so a 6am slip and a clean day are worth the same points and only the
+colour differs. The type selector now wraps to two rows (six options).
+
+Deliberately skipped: midnight wrap-around handling (a 1am slip after a good run reads
+as early rather than as a near-miss). Not worth the ripple through every date
+calculation for someone in bed by 10pm; revisit only if the logs routinely pass ~10pm.
+
+Verified: later reads higher for `up` and earlier reads higher for `down`; the
+sentinel sits on the roof in deep green; log-now stamps the exact minute and disables
+both buttons; a second tap cannot overwrite; the chip sets, clears and marks a past
+day clean; direction persists through create/edit; nothing overflows at 360px.
+→ `sw.js v19`.
+
 ---
 
 ## Still to do / open items

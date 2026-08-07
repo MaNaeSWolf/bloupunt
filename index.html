@@ -100,7 +100,8 @@
   .cnum{min-width:22px;text-align:center;font-family:'Fraunces',Georgia,serif;font-size:20px;color:var(--soft)}
   .cnum.pos{color:var(--sageDeep)}
   .cnum.neg{color:var(--clay)}
-  .seg{display:flex;gap:5px}
+  .seg{display:flex;gap:5px;flex-wrap:wrap}
+  .seg .segBtn{flex:1 1 28%}
   .segBtn{flex:1 1 0;min-width:0;background:var(--bg);border:1px solid var(--faint);color:var(--soft);
     padding:9px 2px;font-size:12px;font-weight:500;border-radius:10px;text-align:center;white-space:nowrap}
   .segBtn.on{background:var(--sage);border-color:var(--sage);color:#fff}
@@ -163,6 +164,17 @@
   .sgrid{width:100%;max-width:322px}   /* 13 cols x 22px + gaps: keeps cells square on desktop */
   .sgrid .months .mCol{flex:1;min-width:0;width:auto}
   .sgrid .months{display:flex;gap:3px}
+  .bigTime{width:58px;flex-shrink:0;text-align:center;font-family:'Fraunces',Georgia,serif;
+    font-size:19px;color:var(--sageDeep);line-height:1.1}
+  .bigTime.empty{color:var(--faint)}
+  .bigTime.none{font-size:16px;color:var(--sage)}
+  .tActs{display:flex;justify-content:space-between;gap:10px;margin-top:12px}
+  .tNow,.tNone{padding:9px 14px;font-size:13px;font-weight:500;border-radius:10px;border:1px solid}
+  .tNow{background:var(--clayBg);border-color:#E7C9BE;color:var(--clay)}
+  .tNone{background:rgba(122,154,126,.10);border-color:#CBDCCD;color:var(--sageDeep)}
+  .tNow:disabled,.tNone:disabled{background:var(--bg);border-color:var(--faint);color:#BFB9B0;cursor:default}
+  .tgraph{margin-top:12px;line-height:0}
+  .chipTime{width:auto;flex:0 0 auto;padding:5px 8px;font-size:13px;border-radius:8px}
 
   .exp{margin-top:18px;padding-top:16px;border-top:1px solid var(--hair)}
   .detail{margin-bottom:10px}
@@ -555,6 +567,23 @@ window.addEventListener('pageshow', autoPull);    // bfcache restore
 
 const isCounter = h => h.type === 'plus' || h.type === 'minus' || h.type === 'plusminus';
 const isScore   = h => h.type === 'score';
+const isTime    = h => h.type === 'time';
+
+/* Time habits log the FIRST time of day the thing happened, as minutes since local
+   midnight. NONE_MIN is the sentinel for "it never happened today" - it sorts as the
+   latest possible moment, so it is both the best day and the top of the graph. */
+const NONE_MIN = 1440;
+const nowMin = () => { const d = new Date(); return d.getHours()*60 + d.getMinutes(); };
+const fmtTime = v => {
+  if (v >= NONE_MIN) return 'None';
+  const hh = Math.floor(v/60), mm = v%60;
+  return String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+};
+// "1h 12m" / "40m" - used for the gap against your own recent baseline.
+const fmtGap = m => {
+  const a = Math.abs(Math.round(m));
+  return a >= 60 ? Math.floor(a/60)+'h '+(a%60?(a%60)+'m':'').trim() : a+'m';
+};
 const hasScore  = () => data.habits.some(isScore);
 // "Logged" == a record exists for that day. Toggle stores 1; a counter may store
 // 0 or a negative net and still counts, because the goal is simply to log.
@@ -656,13 +685,33 @@ function last21(h){
   return out;
 }
 
-function counterScale(h){
+// Direction: 'up' (default) means a higher value is better; 'down' flips the colour
+// ranking. Available to every counting type, not just time - "fewer cigarettes" and
+// "wake earlier" are the same idea as "later on Reddit".
+const isDown = h => h.dir === 'down';
+
+// Band index 0..4 for a logged day, direction-aware, with the NONE sentinel pinned to
+// the top: a day you never did the thing at all is unambiguously the best day, however
+// the rest of the fortnight happened to fall.
+function bandFor(h){
   const days = h.days || {};
   const q = quintiler(last21(h));
+  const down = isDown(h);
+  return k => {
+    const v = days[k];
+    if (isTime(h) && v >= NONE_MIN) return 4;
+    const b = q(v);
+    return down ? 4 - b : b;
+  };
+}
+
+function counterScale(h){
+  const days = h.days || {};
+  const band = bandFor(h);
   return d => {
     const k = keyFor(d);
     if (!has(days, k)) return unloggedShade(h, d);
-    return bandColourIdx(q(days[k]));
+    return bandColourIdx(band(k));
   };
 }
 
@@ -889,7 +938,36 @@ window.bump = (id, k, delta) => {
   render();
 };
 
-window.setFormType = t => { grab(); form.type = t; render(); };
+// Time habits: one tap stamps the current time (first log wins - it is the FIRST
+// time it happened), or you declare the day clean. Both count as logged.
+window.logNow = id => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h || has(h.days, todayKey())) return;
+  h.days[todayKey()] = nowMin();
+  save(); checkMilestones(); render();
+};
+window.logNone = id => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h || has(h.days, todayKey())) return;
+  h.days[todayKey()] = NONE_MIN;
+  save(); checkMilestones(); render();
+};
+window.setDayTime = (id, k, hhmm) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h || !hhmm) return;
+  const [a,b] = hhmm.split(':').map(Number);
+  h.days[k] = Math.max(0, Math.min(NONE_MIN-1, a*60 + b));
+  save(); render();
+};
+window.setDayNone = (id, k) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  h.days[k] = NONE_MIN;
+  save(); render();
+};
+
+window.setFormType = t => { grab(); form.type = t; if (t === 'time' && !form.dir) form.dir = 'up'; render(); };
+window.setFormDir  = d => { grab(); form.dir = d; render(); };
 
 // Pause: excuse the next N days (from tomorrow — today can't be paused, so a
 // break is always deliberate). Excused days neither break nor extend a streak.
@@ -936,14 +1014,14 @@ window.doClearHist     = () => {
 };
 
 window.openNew = () => {
-  form = { name:'', cue:'', stack:'', minimum:'', type:'toggle' };
+  form = { name:'', cue:'', stack:'', minimum:'', type:'toggle', dir:'up' };
   editing = 'new'; confirm = null; screen = 'manage'; render();
 };
 
 window.openEdit = id => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  form = { name:h.name, cue:h.cue||'', stack:h.stack||'', minimum:h.minimum||'', type:h.type||'toggle' };
+  form = { name:h.name, cue:h.cue||'', stack:h.stack||'', minimum:h.minimum||'', type:h.type||'toggle', dir:h.dir||'up' };
   editing = id; confirm = null; clearHist = null; render();
 };
 
@@ -968,7 +1046,8 @@ window.commit = () => {
     cue:     form.cue.trim(),
     stack:   form.stack.trim(),
     minimum: form.minimum.trim(),
-    type:    form.type || 'toggle'
+    type:    form.type || 'toggle',
+    dir:     form.dir || 'up'
   };
   if (editing === 'new'){
     data.habits.push({ id: Date.now(), days:{}, ...payload });
@@ -1202,7 +1281,15 @@ function dayChip(h){
   const label = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+d.getDate()+' '+MONTHS[d.getMonth()];
   const logged = has(h.days, k);
   let controls;
-  if (isCounter(h)){
+  if (isTime(h)){
+    const v = logged ? h.days[k] : null;
+    const hhmm = (v !== null && v < NONE_MIN) ? fmtTime(v) : '';
+    controls =
+      '<input class="chipTime" type="time" value="'+hhmm+'" '+
+        'onchange="setDayTime('+h.id+',\''+k+'\',this.value)">'+
+      '<button class="chipBtn'+((v!==null&&v>=NONE_MIN)?' on':'')+'" onclick="setDayNone('+h.id+',\''+k+'\')">Didn’t happen</button>'+
+      (logged ? '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
+  } else if (isCounter(h)){
     const val = h.days[k] || 0;
     controls =
       '<button class="chipBtn" aria-label="minus one" onclick="bump('+h.id+',\''+k+'\',-1)">−</button>'+
@@ -1218,6 +1305,131 @@ function dayChip(h){
     '<span class="chipDate">'+label+'</span>'+
     controls +
     '<button class="chipX" aria-label="Close" onclick="closeDay()">×</button>'+
+  '</div>';
+}
+
+/* Time habits get a dot-and-line graph instead of the ribbon. The vertical scale is
+   the habit's own observed range over the window - lowest logged time is the floor,
+   latest is the roof - because nothing happens at 3am and there is no point plotting
+   empty hours. Height is GOODNESS, so an improving habit always climbs whichever
+   direction is better. Consecutive logged days are joined; a missed day breaks the
+   line, a paused day is bridged. "None today" sits on the roof, green. */
+const GH = 46, GPAD = 7;
+function timeGraph(h){
+  const today = todayKey();
+  const band = bandFor(h);
+  const info = windowDays(N_DAYS).map(d => {
+    const k = keyFor(d);
+    return { k, v: h.days[k], logged: has(h.days,k),
+             paused: !!(data.paused && data.paused[k] && !has(h.days,k)),
+             today: k===today, sel: !!(dayEdit && dayEdit.id===h.id && dayEdit.key===k) };
+  });
+
+  const vals = info.filter(x=>x.logged).map(x=>x.v);
+  let lo = vals.length ? Math.min(...vals) : 0, hi = vals.length ? Math.max(...vals) : NONE_MIN;
+  if (hi - lo < 30){ lo = Math.max(0, lo - 15); hi = lo + 30; }   // keep a flat run readable
+  const down = isDown(h);
+  const yOf = v => {
+    let t = (v - lo) / (hi - lo);                 // 0..1 up the raw scale
+    if (down) t = 1 - t;                          // height is goodness, not raw value
+    return GH - GPAD - Math.max(0, Math.min(1, t)) * (GH - GPAD*2);
+  };
+  const xOf = i => ((i + 0.5) / N_DAYS) * 100;
+
+  // Join consecutive logged days; a run of paused days bridges the gap.
+  let segs = '';
+  const idx = info.map((x,i)=>x.logged?i:-1).filter(i=>i>=0);
+  for (let n=0;n<idx.length-1;n++){
+    const a = idx[n], b = idx[n+1];
+    let bridged = true;
+    for (let m=a+1;m<b;m++){ if (!info[m].paused){ bridged = false; break; } }
+    if (!bridged) continue;
+    segs += '<line x1="'+xOf(a).toFixed(2)+'%" y1="'+yOf(info[a].v).toFixed(1)+
+            '" x2="'+xOf(b).toFixed(2)+'%" y2="'+yOf(info[b].v).toFixed(1)+
+            '" stroke="var(--faint)" stroke-width="1.5" stroke-linecap="round"/>';
+  }
+
+  const dots = info.map((x,i) => {
+    const cx = xOf(i).toFixed(2)+'%';
+    const hit = '<rect x="'+((i/N_DAYS)*100).toFixed(2)+'%" y="0" width="'+(100/N_DAYS).toFixed(2)+
+      '%" height="'+GH+'" fill="transparent" style="cursor:pointer" role="button" tabindex="0" '+
+      'aria-label="Edit '+x.k+(x.logged?', '+fmtTime(x.v):', not logged')+'" '+
+      'onclick="openDay('+h.id+',\''+x.k+'\')"></rect>';
+    if (!x.logged){
+      const y = GH - GPAD - (GH - GPAD*2)/2;
+      const c = x.today ? '<circle cx="'+cx+'" cy="'+y+'" r="3.2" fill="none" stroke="var(--soft)" stroke-width="1.4"/>'
+        : '<circle cx="'+cx+'" cy="'+y+'" r="1.6" fill="'+(x.paused?'#CBDCCD':'var(--hair)')+'"/>';
+      return c + hit;
+    }
+    const r = x.sel ? 5 : 4;
+    return '<circle cx="'+cx+'" cy="'+yOf(x.v).toFixed(1)+'" r="'+r+'" fill="'+bandColourIdx(band(x.k))+
+      '" stroke="'+(x.sel?'var(--ink)':'rgba(61,59,55,.28)')+'" stroke-width="'+(x.sel?2:1)+'"/>' + hit;
+  }).join('');
+
+  return '<div class="tgraph"><svg viewBox="0 0 100 '+GH+'" preserveAspectRatio="none" '+
+    'width="100%" height="'+GH+'" style="overflow:visible">'+ segs + dots +'</svg></div>';
+}
+
+function timeRow(h, today){
+  const open = expanded === h.id;
+  const logged = has(h.days, today);
+  const v = h.days[today];
+  const risk = rowRisk(h);
+  const s = statsFor(h);
+  const warn = !logged && s.missed === 1, alarm = !logged && s.missed >= 2;
+  const cls = 'row' + (logged?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls;
+
+  // Baseline = mean of the last 21 logged days, excluding the sentinel: comparing a
+  // real time against days you never did it at all would be meaningless.
+  const past = last21(h).filter(x => x < NONE_MIN);
+  const base = past.length ? past.reduce((a,b)=>a+b,0)/past.length : null;
+  const later = isDown(h) ? 'earlier' : 'later';
+  const worse = isDown(h) ? 'later' : 'earlier';
+  let sub;
+  if (!logged) sub = s.missed >= 2 ? 'Missed '+s.missed+' in a row'
+      : s.missed === 1 ? 'Missed yesterday, keep the record going'
+      : (base===null ? 'Not logged yet' : 'Not logged yet · usually '+fmtTime(Math.round(base)));
+  else if (v >= NONE_MIN) sub = 'Never happened today';
+  else if (base === null) sub = 'First one logged';
+  else {
+    const d = v - base, good = isDown(h) ? d < 0 : d > 0;
+    sub = Math.abs(d) < 5 ? 'About your usual' : fmtGap(d)+' '+(good?later:worse)+' than usual';
+  }
+
+  let expBlock = '';
+  if (open){
+    const details = [
+      h.cue   ? '<div class="detail"><div class="dk">When and where</div><div class="dv">'+esc(h.cue)+'</div></div>' : '',
+      h.stack ? '<div class="detail"><div class="dk">Straight after</div><div class="dv">'+esc(h.stack)+'</div></div>' : ''
+    ].join('');
+    let clean = 0, n30 = 0; const c2 = midnight();
+    for (let i=0;i<30;i++){ const k = keyFor(c2); if (has(h.days,k)){ n30++; if (h.days[k] >= NONE_MIN) clean++; } c2.setDate(c2.getDate()-1); }
+    const best = past.length ? (isDown(h) ? Math.min(...past) : Math.max(...past)) : null;
+    expBlock = '<div class="exp">'+ details +
+      '<div class="stats">'+
+        '<div><div class="sl">Usual</div><div class="sv">'+(base===null?'—':fmtTime(Math.round(base)))+'</div></div>'+
+        '<div><div class="sl">Best</div><div class="sv">'+(best===null?'—':fmtTime(best))+'</div></div>'+
+        '<div><div class="sl">Clean</div><div class="sv">'+clean+'/'+n30+'</div></div>'+
+      '</div>'+ fullGrid(h) + '</div>';
+  }
+
+  const bigCls = logged ? (v >= NONE_MIN ? ' none' : '') : ' empty';
+  return '<div class="'+cls+'">'+
+    '<div class="top">'+
+      '<div class="bigTime'+bigCls+'">'+(logged ? fmtTime(v) : '––:––')+'</div>'+
+      '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
+        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span></div>'+
+        '<div class="streak">'+sub+'</div>'+
+      '</button>'+
+      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
+        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+    '</div>'+
+    '<div class="tActs">'+
+      '<button class="tNow"'+(logged?' disabled':'')+' onclick="logNow('+h.id+')">'+
+        (logged ? 'Logged' : 'Log now')+'</button>'+
+      '<button class="tNone"'+(logged?' disabled':'')+' onclick="logNone('+h.id+')">Didn’t happen</button>'+
+    '</div>'+
+    riskBlock(risk) + timeGraph(h) + dayChip(h) + expBlock +
   '</div>';
 }
 
@@ -1359,6 +1571,7 @@ function scoreGrid(q){
 function habitRow(h){
   if (isScore(h)) return scoreRow(h);
   const today = todayKey();
+  if (isTime(h)) return timeRow(h, today);
   if (isCounter(h)) return counterRow(h, today);
   const done  = !!h.days[today];
   const s     = statsFor(h);
@@ -1428,6 +1641,12 @@ function habitRow(h){
   '</div>';
 }
 
+// Which types can have a direction. Toggles and the score have nothing to rank.
+const dirTypes = t => t==='time' || t==='plus' || t==='minus' || t==='plusminus';
+const dirBtn = (d, label) =>
+  '<button type="button" class="segBtn'+((form.dir||'up')===d?' on':'')+'" '+
+    'onclick="setFormDir(\''+d+'\')">'+label+'</button>';
+
 const segBtn = (t, label) =>
   '<button type="button" class="segBtn'+((form.type||'toggle')===t?' on':'')+'" '+
     'onclick="setFormType(\''+t+'\')">'+label+'</button>';
@@ -1436,13 +1655,15 @@ function typeHint(t){
   return t==='plus' ? 'Tap + each time (e.g. a glass of water). Cells are tinted by your 7-day average.'
     : t==='minus' ? 'Tap − each time (e.g. a slip you want to avoid). Cells are tinted by your 7-day average.'
     : t==='plusminus' ? 'Both buttons: + for a win, − for a slip. The day is the running total, tinted by your 7-day average.'
-    : t==='score' ? 'One computed card that totals every habit each day (toggle +2, counter +1 to log plus its band). Nothing to tick — only one allowed.'
+    : t==='time' ? 'Log the first time of day it happened — one tap stamps the clock, or mark the day clean. Drawn as a graph so you can see it moving.'
+    : t==='score' ? 'One computed card that tallies every habit you logged each day, worth more as each chain lengthens. Nothing to tick — only one allowed.'
     : 'A simple daily tick. Builds streaks, milestones and the warming background.';
 }
 
 const typeLabel = t => t==='plus' ? 'Counter · +'
   : t==='minus' ? 'Counter · −'
   : t==='plusminus' ? 'Counter · +/−'
+  : t==='time' ? 'First time of day'
   : t==='score' ? 'Day score'
   : 'Tick';
 
@@ -1453,9 +1674,13 @@ function editorHTML(title){
       '<label class="lbl">How you log it</label>'+
       '<div class="seg">'+
         segBtn('toggle','Tick')+ segBtn('plus','+')+ segBtn('minus','−')+ segBtn('plusminus','+/−')+
-        (allowScore ? segBtn('score','Score') : '')+
+        segBtn('time','Time')+ (allowScore ? segBtn('score','Score') : '')+
       '</div>'+
       '<p class="hint">'+typeHint(form.type)+'</p>'+
+      (dirTypes(form.type) ? '<div class="seg" style="margin-top:10px">'+
+        dirBtn('up', form.type==='time' ? 'Later is better' : 'More is better')+
+        dirBtn('down', form.type==='time' ? 'Earlier is better' : 'Less is better')+
+      '</div>' : '')+
     '</div>';
 
   if (form.type === 'score'){                                // stripped editor - nothing to name/cue
@@ -1653,9 +1878,9 @@ function render(){
           '<div style="font-size:16px;font-weight:500;margin-bottom:'+((h.cue||h.minimum||isCounter(h)||isScore(h))?'5px':'0')+'">'+esc(h.name)+'</div>'+
           (h.cue     ? '<div class="mMeta">'+esc(h.cue)+'</div>' : '')+
           (h.minimum ? '<div class="mMeta">Floor: '+esc(h.minimum)+'</div>' : '')+
-          (isCounter(h) ? '<div class="mMeta">'+typeLabel(h.type)+'</div>' : '')+
+          (isCounter(h)||isTime(h) ? '<div class="mMeta">'+typeLabel(h.type)+(isDown(h)?' · lower is better':'')+'</div>' : '')+
           (isScore(h) ? '<div class="mMeta">Day score · computed from your habits</div>' : '')+
-          (!h.cue && !isCounter(h) && !isScore(h) ? '<div class="mWarn">No cue set</div>' : '')+
+          (!h.cue && !isCounter(h) && !isScore(h) && !isTime(h) ? '<div class="mWarn">No cue set</div>' : '')+
         '</div>'+
         '<button class="link" onclick="openEdit('+h.id+')">Edit</button>'+
         '<button class="link red" onclick="askRemove('+h.id+')">Remove</button>'+
