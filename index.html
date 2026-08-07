@@ -370,6 +370,7 @@ let noticeTimer = null;
 let pauseOpen = false;      // pause-days chooser open
 let dayEdit   = null;       // { id, key } — the strip day-edit chip target
 let clearHist = null;       // habit id whose "clear all history" is awaiting confirm
+let swVersion = '';         // reported by the service worker, shown under Manage
 
 const save = () => {
   data.updatedAt = Date.now();
@@ -1910,7 +1911,8 @@ function render(){
     const cap = (data.habits.length >= 3 && !editing)
       ? '<p class="cap">Three is plenty. Adding more is usually how the chain gets dropped.</p>' : '';
 
-    body = '<div class="stack">'+ cards + adder + cap +'</div>'+ syncPanel();
+    body = '<div class="stack">'+ cards + adder + cap +'</div>'+ syncPanel()+
+      (swVersion ? '<p class="cap" style="margin-top:16px">Build '+esc(swVersion)+'</p>' : '');
   }
 
   document.getElementById('app').innerHTML =
@@ -1959,8 +1961,26 @@ setInterval(() => {
 // Service worker — offline cold launch. Relative path so it scopes to /bloupunt/.
 // Registration failure is non-fatal: the app already works from localStorage.
 if ('serviceWorker' in navigator){
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    // A new worker just took over - but THIS page was already served from the old
+    // cache, so without a reload you keep looking at the previous build. Reload once.
+    // Skipped on a first-ever install, where there was no controller to replace.
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+  navigator.serviceWorker.addEventListener('message', e => {
+    if (e.data && e.data.type === 'version'){ swVersion = e.data.version; render(); }
+  });
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      reg.update();                                    // always check for a newer shell
+      const ask = () => navigator.serviceWorker.controller &&
+        navigator.serviceWorker.controller.postMessage({ type:'version' });
+      ask(); setTimeout(ask, 900);
+    }).catch(() => {});
   });
 }
 </script>

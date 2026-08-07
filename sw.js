@@ -8,7 +8,7 @@
    │ the updated shell. Forget it and phones keep serving the old page. │
    └──────────────────────────────────────────────────────────────────┘ */
 
-const VERSION = 'bloupunt-v21';
+const VERSION = 'bloupunt-v22';
 const CORE = ['./', './index.html'];
 
 self.addEventListener('install', e => {
@@ -23,6 +23,12 @@ self.addEventListener('activate', e => {
       .then(keys => Promise.all(keys.filter(k => k !== VERSION).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+// Let the page ask which build is actually running, so the version shown in Manage
+// is the worker's own truth rather than a number the page hopes is right.
+self.addEventListener('message', e => {
+  if (e.data && e.data.type === 'version' && e.source) e.source.postMessage({ type:'version', version: VERSION });
 });
 
 self.addEventListener('fetch', e => {

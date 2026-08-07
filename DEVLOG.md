@@ -565,6 +565,28 @@ the whole good-to-less-good scale in the only view that carries it. Now gated on
 missed grey. (`chainStrip` keeps the counter-only test on purpose — time rows use
 `timeGraph`, not the ribbon.) → `sw.js v21`.
 
+### 2026-08-07 (later) — Updates now land in one visit, and the build is visible
+Reported as "the month view is still all green". It was not: v21 renders it correctly
+(verified on the live site — the month cells matched the week graph dot-for-dot). The
+device was showing a **stale build**, and the cause is structural rather than a
+one-off: the worker calls `skipWaiting()` + `clients.claim()`, so a new build takes
+over immediately — but the page already on screen was served from the *old* cache, so
+you had to reload a second time to see anything change. Every "open it once online to
+pull vN" this session has had that trap in it.
+
+Now the page listens for `controllerchange` and reloads itself once when a new worker
+takes over (guarded by `hadController`, so a first-ever install does not reload, and by
+a `reloaded` flag so it cannot loop). `reg.update()` on load forces the check.
+
+Also added a **build indicator**: the worker answers a `postMessage({type:'version'})`
+with its own `VERSION`, shown as "Build bloupunt-vNN" at the bottom of Manage. The
+worker is the source of truth, so the number cannot drift from what is actually
+running — and there is now a way to tell at a glance which build a device is on.
+
+Verified by simulating a deploy: with an old build installed, a **single** navigation
+ended up running the new shell and the new cache, no manual second reload.
+→ `sw.js v22`.
+
 ---
 
 ## Still to do / open items
