@@ -8,7 +8,7 @@
    │ the updated shell. Forget it and phones keep serving the old page. │
    └──────────────────────────────────────────────────────────────────┘ */
 
-const VERSION = 'bloupunt-v19';
+const VERSION = 'bloupunt-v20';
 const CORE = ['./', './index.html'];
 
 self.addEventListener('install', e => {

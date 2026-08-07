@@ -532,6 +532,31 @@ both buttons; a second tap cannot overwrite; the chip sets, clears and marks a p
 day clean; direction persists through create/edit; nothing overflows at 360px.
 → `sw.js v19`.
 
+### 2026-08-07 (later) — Fix the squished time UI
+Three faults in the v19 build, all found by measuring rather than looking:
+
+- **Dots rendered as overlapping ovals.** The graph used `viewBox="0 0 100 46"` with
+  `preserveAspectRatio="none"`, so a 290px-wide strip scaled x by 2.9 and y by 1 — a
+  circle came out **9.3 × 3.2px**, and 16 neighbouring pairs overlapped. Dropped the
+  viewBox entirely: user units are now CSS pixels, x stays a percentage (still
+  responsive), y is px. Circles are round 8×8 with zero overlaps.
+- **Editor buttons collided with the hint text.** A **class-name collision**: the
+  ribbon's day segments and the editor's type selector were both `.seg`, and the
+  ribbon rule (`height:15px`) won, so the selector could not grow to its second row —
+  it reported `height:15px` against `scrollHeight:75px` and the wrapped row spilled
+  over the paragraph below. Renamed the editor's container to `.picker` (fewer touch
+  points than renaming the ribbon's segment variants). Now 75px, both rows inside,
+  hint below.
+- **Changing a habit's type kept nonsense values.** Switching a counter to a time
+  habit left values like `-1`, which `fmtTime` rendered as "-1:-6". Values only mean
+  something inside a family (`famOf`: toggle / counter / time / score), so crossing
+  families now clears the history — with a warning shown in the editor *before* saving
+  ("will clear the 16 logged days"). `fmtTime` also clamps defensively.
+
+Also dropped the `done` class from time rows: a struck-through habit name reads as an
+achievement, which is wrong when what you logged is the slip you are trying to avoid.
+→ `sw.js v20`.
+
 ---
 
 ## Still to do / open items

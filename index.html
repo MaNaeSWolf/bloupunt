@@ -100,8 +100,8 @@
   .cnum{min-width:22px;text-align:center;font-family:'Fraunces',Georgia,serif;font-size:20px;color:var(--soft)}
   .cnum.pos{color:var(--sageDeep)}
   .cnum.neg{color:var(--clay)}
-  .seg{display:flex;gap:5px;flex-wrap:wrap}
-  .seg .segBtn{flex:1 1 28%}
+  .picker{display:flex;gap:5px;flex-wrap:wrap}
+  .picker .segBtn{flex:1 1 28%}
   .segBtn{flex:1 1 0;min-width:0;background:var(--bg);border:1px solid var(--faint);color:var(--soft);
     padding:9px 2px;font-size:12px;font-weight:500;border-radius:10px;text-align:center;white-space:nowrap}
   .segBtn.on{background:var(--sage);border-color:var(--sage);color:#fff}
@@ -575,9 +575,10 @@ const isTime    = h => h.type === 'time';
 const NONE_MIN = 1440;
 const nowMin = () => { const d = new Date(); return d.getHours()*60 + d.getMinutes(); };
 const fmtTime = v => {
+  if (!isFinite(v)) return '––:––';
   if (v >= NONE_MIN) return 'None';
-  const hh = Math.floor(v/60), mm = v%60;
-  return String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+  const m = Math.max(0, Math.min(NONE_MIN-1, Math.round(v)));
+  return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
 };
 // "1h 12m" / "40m" - used for the gap against your own recent baseline.
 const fmtGap = m => {
@@ -1053,7 +1054,11 @@ window.commit = () => {
     data.habits.push({ id: Date.now(), days:{}, ...payload });
   } else {
     const h = data.habits.find(x => x.id === editing);
-    if (h) Object.assign(h, payload);
+    if (h){
+      // A counter's -1 is not a time of day. Crossing families drops the old values.
+      if (famOf(h.type||'toggle') !== famOf(payload.type)) h.days = {};
+      Object.assign(h, payload);
+    }
   }
   save(); editing = null; render();
 };
@@ -1366,8 +1371,9 @@ function timeGraph(h){
       '" stroke="'+(x.sel?'var(--ink)':'rgba(61,59,55,.28)')+'" stroke-width="'+(x.sel?2:1)+'"/>' + hit;
   }).join('');
 
-  return '<div class="tgraph"><svg viewBox="0 0 100 '+GH+'" preserveAspectRatio="none" '+
-    'width="100%" height="'+GH+'" style="overflow:visible">'+ segs + dots +'</svg></div>';
+  // No viewBox: user units are CSS pixels, so the circles stay round. x is given as a
+  // percentage (responsive), y in px.
+  return '<div class="tgraph"><svg width="100%" height="'+GH+'">'+ segs + dots +'</svg></div>';
 }
 
 function timeRow(h, today){
@@ -1377,7 +1383,7 @@ function timeRow(h, today){
   const risk = rowRisk(h);
   const s = statsFor(h);
   const warn = !logged && s.missed === 1, alarm = !logged && s.missed >= 2;
-  const cls = 'row' + (logged?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls;
+  const cls = 'row' + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls;
 
   // Baseline = mean of the last 21 logged days, excluding the sentinel: comparing a
   // real time against days you never did it at all would be meaningless.
@@ -1641,6 +1647,10 @@ function habitRow(h){
   '</div>';
 }
 
+// Values only mean something within a family, so switching families must drop history.
+const famOf = t => t==='score' ? 'score' : t==='time' ? 'time'
+  : (t==='plus'||t==='minus'||t==='plusminus') ? 'counter' : 'toggle';
+
 // Which types can have a direction. Toggles and the score have nothing to rank.
 const dirTypes = t => t==='time' || t==='plus' || t==='minus' || t==='plusminus';
 const dirBtn = (d, label) =>
@@ -1672,12 +1682,16 @@ function editorHTML(title){
   const allowScore = !hasScore() || form.type === 'score';   // at most one score card
   const seg = '<div class="fld">'+
       '<label class="lbl">How you log it</label>'+
-      '<div class="seg">'+
+      '<div class="picker">'+
         segBtn('toggle','Tick')+ segBtn('plus','+')+ segBtn('minus','−')+ segBtn('plusminus','+/−')+
         segBtn('time','Time')+ (allowScore ? segBtn('score','Score') : '')+
       '</div>'+
       '<p class="hint">'+typeHint(form.type)+'</p>'+
-      (dirTypes(form.type) ? '<div class="seg" style="margin-top:10px">'+
+      ((eh && famOf(eh.type||'toggle') !== famOf(form.type) && Object.keys(eh.days||{}).length)
+        ? '<p class="hint" style="color:var(--clay)">Changing to this type will clear the '+
+          Object.keys(eh.days).length+' logged day'+(Object.keys(eh.days).length===1?'':'s')+
+          ' — the old values mean nothing on the new scale.</p>' : '')+
+      (dirTypes(form.type) ? '<div class="picker" style="margin-top:10px">'+
         dirBtn('up', form.type==='time' ? 'Later is better' : 'More is better')+
         dirBtn('down', form.type==='time' ? 'Earlier is better' : 'Less is better')+
       '</div>' : '')+
