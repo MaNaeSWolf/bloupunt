@@ -587,6 +587,12 @@ Verified by simulating a deploy: with an old build installed, a **single** navig
 ended up running the new shell and the new cache, no manual second reload.
 → `sw.js v22`.
 
+### 2026-08-07 (later) — Build indicator on every screen
+Moved the build line out of the Manage-only branch into the shared footer, so it shows
+on Today as well. Own `.build` style (10px, half opacity, centred) rather than the
+`.cap` it borrowed — quiet enough to ignore, there when you go looking.
+→ `sw.js v23`.
+
 ---
 
 ## Still to do / open items

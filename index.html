@@ -221,6 +221,7 @@
   .mWarn{font-size:12.5px;color:var(--amber);margin-top:4px}
   .btnRed{background:var(--clay);color:#fff;padding:8px 16px;font-size:13px;font-weight:500}
   .cap{font-size:12px;color:var(--soft);text-align:center;margin-top:6px;line-height:1.6}
+  .build{font-size:10px;color:var(--soft);opacity:.5;text-align:center;margin-top:20px;letter-spacing:.05em}
 
   .banner{border-radius:12px;padding:10px 14px;font-size:13px;margin-bottom:16px}
   .banner.err{background:var(--clayBg);border:1px solid var(--clay);color:var(--clay)}
@@ -1911,8 +1912,7 @@ function render(){
     const cap = (data.habits.length >= 3 && !editing)
       ? '<p class="cap">Three is plenty. Adding more is usually how the chain gets dropped.</p>' : '';
 
-    body = '<div class="stack">'+ cards + adder + cap +'</div>'+ syncPanel()+
-      (swVersion ? '<p class="cap" style="margin-top:16px">Build '+esc(swVersion)+'</p>' : '');
+    body = '<div class="stack">'+ cards + adder + cap +'</div>'+ syncPanel();
   }
 
   document.getElementById('app').innerHTML =
@@ -1936,6 +1936,7 @@ function render(){
       : screen === 'today' && syncStatus === 'error'
       ? '<div class="banner err">Sync failed. Your data is safe on this device.</div>' : '')+
     body +
+    (swVersion ? '<p class="build">'+esc(swVersion)+'</p>' : '')+
     (flash ? '<div class="breath" aria-hidden="true"></div>' : '')+
     celebrationHTML();
 
