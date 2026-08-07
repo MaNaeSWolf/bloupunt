@@ -1228,7 +1228,9 @@ function fullGrid(h){
   }
 
   const now = new Date(), today = todayKey();
-  const counter = isCounter(h), col = counter ? counterScale(h) : null;
+  // Time habits are banded like counters here - the month grid is colour-only, so it
+  // needs the good-to-less-good scale, not the toggle's flat green.
+  const graded = isCounter(h) || isTime(h), col = graded ? counterScale(h) : null;
 
   // Label the first column of each month. Suppress a label whose month is only a
   // narrow sliver at the left edge (fewer than 3 week-columns before the next month),
@@ -1249,7 +1251,7 @@ function fullGrid(h){
   const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
     const future = d > now, k = keyFor(d);
     const cls = 'cell'+(future?' future':'')+(k===today?' today':'')+((data.paused && data.paused[k] && !has(h.days,k))?' paused':'')+(has(h.days,k)?' marked':'');
-    const bg  = counter ? col(d) : shade(h,d);
+    const bg  = graded ? col(d) : shade(h,d);
     return '<div class="'+cls+'" style="background:'+bg+'"></div>';
   }).join('') + '</div>').join('');
 

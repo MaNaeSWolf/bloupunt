@@ -557,6 +557,14 @@ Also dropped the `done` class from time rows: a struck-through habit name reads 
 achievement, which is wrong when what you logged is the slip you are trying to avoid.
 → `sw.js v20`.
 
+### 2026-08-07 (later) — Time habits were flat green in the month view
+`fullGrid` only reached for the band colours when `isCounter(h)`, so a time habit fell
+through to `shade()` and every logged day rendered the toggle's solid green — losing
+the whole good-to-less-good scale in the only view that carries it. Now gated on
+`isCounter(h) || isTime(h)`. Verified: the month grid renders all five bands plus the
+missed grey. (`chainStrip` keeps the counter-only test on purpose — time rows use
+`timeGraph`, not the ribbon.) → `sw.js v21`.
+
 ---
 
 ## Still to do / open items
