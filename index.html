@@ -57,11 +57,13 @@
 
   .stack{display:flex;flex-direction:column;gap:12px}
   .row{background:var(--card);border:1px solid var(--hair);border-radius:18px;padding:16px 18px;
-    transition:border-color 200ms ease,box-shadow 200ms ease,background 200ms ease}
+    outline:2px solid transparent;outline-offset:-1px;
+    transition:border-color 200ms ease,box-shadow 200ms ease,background 200ms ease,outline-color 500ms ease}
   .row:hover{box-shadow:0 3px 16px rgba(61,59,55,.06)}
   .row.done{border-color:#CBDCCD}
   .row.warn{border-color:var(--amber);background:var(--amberBg)}
   .row.alarm{border:1.5px solid var(--clay);background:var(--clayBg)}
+  .row.undone{outline-color:var(--sage)}
   .row.m1{border-color:var(--clay)}
   .row.m7{border-width:2px;border-color:var(--clay)}
   .row.m21{border-width:3px;border-color:var(--clay)}
@@ -375,6 +377,8 @@ let pauseOpen = false;      // pause-days chooser open
 let dayEdit   = null;       // { id, key } — the strip day-edit chip target
 let clearHist = null;       // habit id whose "clear all history" is awaiting confirm
 let swVersion = '';         // reported by the service worker, shown under Manage
+let flashIds  = {};         // habit ids briefly outlined after an undo
+let flashTimer = null;
 
 /* Session-only undo. The snapshot is the serialized state as it was BEFORE a change,
    so capturing it inside save() covers every action that persists through one hook.
@@ -399,12 +403,20 @@ const save = (undoable = true) => {
 window.undo = () => {
   if (!undoStack.length) return;
   let obj; try { obj = JSON.parse(undoStack.pop()); } catch(e){ return; }
+  // Outline whatever actually changed rather than announcing it in a banner: a card
+  // appearing at the top would shove every row down and then snap back.
+  const snapshot = list => { const m={}; for (const h of list||[]) m[h.id] = JSON.stringify(h); return m; };
+  const before = snapshot(data.habits);
   data = { habits: obj.habits||[], seen: obj.seen||{}, paused: obj.paused||{}, updatedAt: obj.updatedAt||0 };
+  const after = snapshot(data.habits);
+  flashIds = {};
+  for (const id of new Set(Object.keys(before).concat(Object.keys(after))))
+    if (before[id] !== after[id]) flashIds[id] = true;
+
   dayEdit = null; clearHist = null; confirm = null; editing = null;
   save(false);                       // persist and sync, but the undo is not itself an action
-  notice = { ok:true, msg:'Undone.' };
-  clearTimeout(noticeTimer);
-  noticeTimer = setTimeout(() => { notice = null; render(); }, 2200);
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { flashIds = {}; render(); }, 2000);
   render();
 };
 
@@ -1424,7 +1436,7 @@ function timeRow(h, today){
   const risk = rowRisk(h);
   const s = statsFor(h);
   const warn = !logged && s.missed === 1, alarm = !logged && s.missed >= 2;
-  const cls = 'row' + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls;
+  const cls = 'row' + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls + (flashIds[h.id]?' undone':'');
 
   // Baseline = mean of the last 21 logged days, excluding the sentinel: comparing a
   // real time against days you never did it at all would be meaningless.
@@ -1504,7 +1516,7 @@ function counterRow(h, today){
   let mark = null;
   for (const m of STREAK_MARKS) if (s.streak >= m.d) mark = m;
   const risk = rowRisk(h);
-  const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls;
+  const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls + (flashIds[h.id]?' undone':'');
   const pill = (mark && mark.d >= 21)
     ? '<span class="pill'+(mark.d>=90?' gold':'')+'">'+mark.d+'d</span>' : '';
 
@@ -1632,7 +1644,7 @@ function habitRow(h){
   for (const m of STREAK_MARKS) if (s.streak >= m.d) mark = m;
 
   const risk = rowRisk(h);
-  const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls;
+  const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls + (flashIds[h.id]?' undone':'');
 
   const streakLine = alarm ? 'Missed '+s.missed+' in a row'
     : warn ? 'Missed yesterday \u2014 don\u2019t miss twice'
