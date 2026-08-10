@@ -105,7 +105,9 @@
   .segBtn{flex:1 1 0;min-width:0;background:var(--bg);border:1px solid var(--faint);color:var(--soft);
     padding:9px 2px;font-size:12px;font-weight:500;border-radius:10px;text-align:center;white-space:nowrap}
   .segBtn.on{background:var(--sage);border-color:var(--sage);color:#fff}
-  .navGrp{display:flex;gap:8px;flex-shrink:0}
+  .navGrp{display:flex;gap:7px;flex-shrink:0;align-items:flex-start}
+  .navBtn.iconBtn{padding:8px 10px;display:grid;place-items:center;line-height:0}
+  .navBtn.iconBtn:disabled{opacity:.3;cursor:default}
   .bar.paused,.cell.paused{box-shadow:inset 0 0 0 1.5px #CBDCCD}
   .pauseCard{background:var(--card);border:1px solid var(--sage);border-radius:16px;padding:15px 16px;margin-bottom:16px}
   .pauseHint{font-size:13px;color:var(--soft);line-height:1.55;margin-bottom:12px}
@@ -374,10 +376,36 @@ let dayEdit   = null;       // { id, key } — the strip day-edit chip target
 let clearHist = null;       // habit id whose "clear all history" is awaiting confirm
 let swVersion = '';         // reported by the service worker, shown under Manage
 
-const save = () => {
+/* Session-only undo. The snapshot is the serialized state as it was BEFORE a change,
+   so capturing it inside save() covers every action that persists through one hook.
+   Never written to localStorage: the history dies with the tab, by design. Pass
+   undoable=false for changes that are not a user action of their own - a sync merge,
+   or the seen{} write that trails a milestone - so one tap is never two undos. */
+const UNDO_MAX = 10;
+let undoStack = [];
+let prevSnap  = '';
+
+const save = (undoable = true) => {
+  if (undoable && prevSnap){
+    undoStack.push(prevSnap);
+    if (undoStack.length > UNDO_MAX) undoStack.shift();
+  }
   data.updatedAt = Date.now();
   try { localStorage.setItem('bloupunt-data', JSON.stringify(data)); } catch(e){}
+  prevSnap = JSON.stringify(data);
   if (syncReady()) { pendingPush = true; clearTimeout(pushTimer); pushTimer = setTimeout(pushRemote, 1500); }
+};
+
+window.undo = () => {
+  if (!undoStack.length) return;
+  let obj; try { obj = JSON.parse(undoStack.pop()); } catch(e){ return; }
+  data = { habits: obj.habits||[], seen: obj.seen||{}, paused: obj.paused||{}, updatedAt: obj.updatedAt||0 };
+  dayEdit = null; clearHist = null; confirm = null; editing = null;
+  save(false);                       // persist and sync, but the undo is not itself an action
+  notice = { ok:true, msg:'Undone.' };
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { notice = null; render(); }, 2200);
+  render();
 };
 
 /* ═══════════════ SYNC — encrypted blob in a private GitHub repo ═══════════════
@@ -539,7 +567,7 @@ async function pullRemote(){
       unionInto(obj);                                     // union - never drops a logged day
       const mergedSig = dataSig(data);
       if (mergedSig !== remoteSig) {
-        save();                                           // remote missing data -> push superset (bumps updatedAt)
+        save(false);                                      // remote missing data -> push superset (bumps updatedAt)
       } else {
         data.updatedAt = Math.max(data.updatedAt||0, obj.updatedAt||0);   // already in sync -> adopt clock, no push
         try { localStorage.setItem('bloupunt-data', JSON.stringify(data)); } catch(e){}
@@ -895,7 +923,7 @@ function checkMilestones(){
   if (!hits.length) return;
   hits.sort((a,b) => b.weight - a.weight);
   hits.forEach(x => { data.seen[x.id] = true; });
-  save();
+  save(false);
   celebration = hits[0];
 }
 
@@ -1160,6 +1188,10 @@ const esc = s => String(s ?? '')
 const TICK_SVG = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none">'+
   '<path d="M2.5 7.2L5.6 10.2L11.5 4" stroke="#fff" stroke-width="1.9" '+
   'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const UNDO_SVG = '<svg width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">'+
+  '<path d="M2.6 8a5.4 5.4 0 1 0 1.9-4.1" stroke="currentColor" stroke-width="1.7" '+
+  'stroke-linecap="round"/><path d="M2.2 2.6v3.6h3.6" stroke="currentColor" '+
+  'stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const CHEV_SVG = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none">'+
   '<path d="M2.5 4.5L6 8L9.5 4.5" stroke="#8A857D" stroke-width="1.4" '+
   'stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -1933,6 +1965,8 @@ function render(){
         (screen==='today' ? '<button class="navBtn" onclick="togglePause()">Pause</button>' : '')+
         '<button class="navBtn" onclick="setScreen(\''+(screen==='today'?'manage':'today')+'\')">'+
           (screen==='today'?'Manage':'Done')+'</button>'+
+        '<button class="navBtn iconBtn" onclick="undo()"'+(undoStack.length?'':' disabled')+
+          ' aria-label="Undo last change" title="Undo">'+UNDO_SVG+'</button>'+
       '</div>'+
     '</div>'+
     (screen==='today' ? pausePanel() : '')+
@@ -1953,6 +1987,7 @@ function render(){
 
 /* ═══════════════ BOOT ═══════════════ */
 
+prevSnap = JSON.stringify(data);   // baseline, so the very first action is undoable
 render();
 booted = true;
 checkMilestones();
