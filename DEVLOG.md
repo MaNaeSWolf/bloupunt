@@ -593,6 +593,20 @@ on Today as well. Own `.build` style (10px, half opacity, centred) rather than t
 `.cap` it borrowed — quiet enough to ignore, there when you go looking.
 → `sw.js v23`.
 
+### 2026-08-10 — A slip can revoke a clean day
+"Didn't happen" locked the day, so going on Reddit at 8pm after marking the morning
+clean left no way to record it. The original "first log wins" rule was too broad: it
+should be the first *real occurrence* that stands. A sentinel is a claim about the
+whole day, and a later slip falsifies it.
+
+`logNow` now bails only when an actual time is already stored (`< NONE_MIN`), so it
+overwrites the clean marker but never an earlier real time. The clean state reads as
+**chosen** rather than merely greyed — "Didn't happen ✓" in filled sage, with "Log
+now" still live beside it. The reverse is not offered on the row: once a real time is
+recorded the day is definitionally not clean, and a mis-tap is fixed through the day
+chip. The chain is unaffected either way, since the day was already logged.
+→ `sw.js v24`.
+
 ---
 
 ## Still to do / open items

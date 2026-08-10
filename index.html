@@ -173,6 +173,7 @@
   .tNow{background:var(--clayBg);border-color:#E7C9BE;color:var(--clay)}
   .tNone{background:rgba(122,154,126,.10);border-color:#CBDCCD;color:var(--sageDeep)}
   .tNow:disabled,.tNone:disabled{background:var(--bg);border-color:var(--faint);color:#BFB9B0;cursor:default}
+  .tNone.on,.tNone.on:disabled{background:var(--sage);border-color:var(--sage);color:#fff}
   .tgraph{margin-top:12px;line-height:0}
   .chipTime{width:auto;flex:0 0 auto;padding:5px 8px;font-size:13px;border-radius:8px}
 
@@ -941,12 +942,16 @@ window.bump = (id, k, delta) => {
   render();
 };
 
-// Time habits: one tap stamps the current time (first log wins - it is the FIRST
-// time it happened), or you declare the day clean. Both count as logged.
+// Time habits: one tap stamps the current time, or you declare the day clean.
+// The first REAL time stands - a later slip never overwrites an earlier one. But
+// "didn't happen" is a claim about the whole day, and going on at 8pm falsifies it,
+// so a slip can always replace the clean marker.
 window.logNow = id => {
   const h = data.habits.find(x => x.id === id);
-  if (!h || has(h.days, todayKey())) return;
-  h.days[todayKey()] = nowMin();
+  if (!h) return;
+  const k = todayKey();
+  if (has(h.days, k) && h.days[k] < NONE_MIN) return;   // a real first time already stands
+  h.days[k] = nowMin();
   save(); checkMilestones(); render();
 };
 window.logNone = id => {
@@ -1423,7 +1428,8 @@ function timeRow(h, today){
       '</div>'+ fullGrid(h) + '</div>';
   }
 
-  const bigCls = logged ? (v >= NONE_MIN ? ' none' : '') : ' empty';
+  const clean = logged && v >= NONE_MIN;      // marked "didn't happen" - still revocable
+  const bigCls = logged ? (clean ? ' none' : '') : ' empty';
   return '<div class="'+cls+'">'+
     '<div class="top">'+
       '<div class="bigTime'+bigCls+'">'+(logged ? fmtTime(v) : '––:––')+'</div>'+
@@ -1435,9 +1441,10 @@ function timeRow(h, today){
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
     '<div class="tActs">'+
-      '<button class="tNow"'+(logged?' disabled':'')+' onclick="logNow('+h.id+')">'+
-        (logged ? 'Logged' : 'Log now')+'</button>'+
-      '<button class="tNone"'+(logged?' disabled':'')+' onclick="logNone('+h.id+')">Didn’t happen</button>'+
+      '<button class="tNow"'+((logged && !clean)?' disabled':'')+' onclick="logNow('+h.id+')">'+
+        ((logged && !clean) ? 'Logged' : 'Log now')+'</button>'+
+      '<button class="tNone'+(clean?' on':'')+'"'+(logged?' disabled':'')+
+        ' onclick="logNone('+h.id+')">'+(clean ? 'Didn’t happen ✓' : 'Didn’t happen')+'</button>'+
     '</div>'+
     riskBlock(risk) + timeGraph(h) + dayChip(h) + expBlock +
   '</div>';
