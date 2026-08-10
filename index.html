@@ -63,13 +63,15 @@
   .row.done{border-color:#CBDCCD}
   .row.warn{border-color:var(--amber);background:var(--amberBg)}
   .row.alarm{border:1.5px solid var(--clay);background:var(--clayBg)}
-  .row.undone{outline-color:var(--sage)}
   .row.m1{border-color:var(--clay)}
   .row.m7{border-width:2px;border-color:var(--clay)}
   .row.m21{border-width:3px;border-color:var(--clay)}
   .row.atRisk{border:2px solid var(--gold);animation:stake 2.6s ease-in-out infinite}
   @keyframes stake{0%,100%{box-shadow:0 0 0 0 rgba(176,141,63,0)}
     50%{box-shadow:0 0 0 5px rgba(176,141,63,.20)}}
+  /* Undo cue. Outline + glow only - both draw outside the layout box, so no row moves. */
+  .row.undone{outline-color:var(--sage);outline-width:3px;background:#F3F8F3;
+    box-shadow:0 0 0 5px rgba(122,154,126,.18)}
   .riskBar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 0;padding:9px 11px;
     background:rgba(176,141,63,.10);border-radius:12px;font-size:12.5px;color:var(--gold);
     font-weight:500;line-height:1.45}
@@ -110,6 +112,12 @@
   .navGrp{display:flex;gap:7px;flex-shrink:0;align-items:flex-start}
   .navBtn.iconBtn{padding:8px 10px;display:grid;place-items:center;line-height:0}
   .navBtn.iconBtn:disabled{opacity:.3;cursor:default}
+  .sBtn{font-family:'Fraunces',Georgia,serif;font-size:17px;font-weight:600;font-style:italic;
+    padding:5px 13px;line-height:1.25;transition:color 300ms ease,border-color 300ms ease}
+  .sBtn.good{color:var(--sageDeep);border-color:#CBDCCD}
+  .sBtn.bad{color:var(--clay);border-color:#E7C9BE}
+  .sBtn.idle,.sBtn.off{color:var(--ink)}
+  .sBtn.busy{color:var(--soft)}
   .bar.paused,.cell.paused{box-shadow:inset 0 0 0 1.5px #CBDCCD}
   .pauseCard{background:var(--card);border:1px solid var(--sage);border-radius:16px;padding:15px 16px;margin-bottom:16px}
   .pauseHint{font-size:13px;color:var(--soft);line-height:1.55;margin-bottom:12px}
@@ -504,10 +512,19 @@ function syncLabel(){
     error:'Sync: failed \u2014 check details / connection'
   }[syncStatus];
 }
+// One glyph carries the whole sync state: red failed, green synced, ink idle.
+function syncTone(){
+  if (syncStatus === 'error' || syncStatus === 'expired') return 'bad';
+  if (!syncReady()) return 'off';
+  if (syncStatus === 'syncing') return 'busy';
+  return (syncStatus === 'ok' && !pendingPush) ? 'good' : 'idle';
+}
 function setSyncStatus(s){
   syncStatus = s;
   const el = document.getElementById('syncStat');
   if (el) el.textContent = syncLabel();
+  const b = document.getElementById('sBtn');            // repaint in place, no re-render
+  if (b){ b.className = 'navBtn iconBtn sBtn ' + syncTone(); b.title = syncLabel(); }
 }
 
 async function ghGet(){
@@ -1140,6 +1157,14 @@ window.saveSync = () => {
   if (syncReady()) pullRemote(); else render();
 };
 window.syncNow = () => pullRemote();
+
+// Tap to sync: flush anything waiting, then pull. Unconfigured, it opens the settings.
+window.syncTap = async () => {
+  if (!syncReady()){ screen = 'manage'; syncOpen = true; render(); return; }
+  await flushPush();
+  await pullRemote();
+  render();
+};
 
 window.exportData = () => {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
@@ -1979,15 +2004,13 @@ function render(){
           (screen==='today'?'Manage':'Done')+'</button>'+
         '<button class="navBtn iconBtn" onclick="undo()"'+(undoStack.length?'':' disabled')+
           ' aria-label="Undo last change" title="Undo">'+UNDO_SVG+'</button>'+
+        '<button id="sBtn" class="navBtn iconBtn sBtn '+syncTone()+'" onclick="syncTap()" '+
+          'aria-label="'+esc(syncLabel())+'" title="'+esc(syncLabel())+'">S</button>'+
       '</div>'+
     '</div>'+
     (screen==='today' ? pausePanel() : '')+
     (notice
       ? '<div class="banner '+(notice.ok?'ok':'err')+'">'+esc(notice.msg)+'</div>' : '')+
-    (screen === 'today' && syncStatus === 'expired'
-      ? '<div class="banner err">Sync token expired or invalid. Update it under Manage sync. Your data is safe on this device.</div>'
-      : screen === 'today' && syncStatus === 'error'
-      ? '<div class="banner err">Sync failed. Your data is safe on this device.</div>' : '')+
     body +
     (swVersion ? '<p class="build">'+esc(swVersion)+'</p>' : '')+
     (flash ? '<div class="breath" aria-hidden="true"></div>' : '')+
