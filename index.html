@@ -797,26 +797,29 @@ function chainRun(h){
   if (_chainCache[h.id]) return _chainCache[h.id];
   const days = h.days || {}, paused = data.paused || {};
   const points = {};
-  let chain = 0, missRun = 0;
+  let chain = 0, graceUsed = false, runDrops = 0;
   const start = habitStart(h), end = midnight();
   if (start){
     for (const d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
       const k = keyFor(d);
-      if (has(days, k)){ chain++; missRun = 0; points[k] = tierPoints(chain); }
+      if (has(days, k)){ chain++; runDrops = 0; points[k] = tierPoints(chain); }
       else if (paused[k]){ /* bridges: neither builds nor breaks */ }
       else if (k === keyFor(end)){ /* today is grace until tomorrow */ }
       else {
-        missRun++;
-        // One free day, then EVERY further missed day costs a tier, all the way down
-        // to the floor - logging is always worth 1, so the ladder cannot go negative.
-        if (missRun >= 2){
+        // ONE free day per chain, not per gap. Spend it and every missed day after
+        // costs a tier, down to the floor - logging is always worth 1, so the ladder
+        // never goes negative. Falling to the floor is a fresh start: grace returns.
+        if (!graceUsed) graceUsed = true;
+        else {
           const t = tierOf(chain);
-          chain = t > 0 ? TIER_DAYS[t-1] : 0;   // back to the start of the tier below
+          chain = t > 0 ? TIER_DAYS[t-1] : 0;
+          runDrops++;
         }
+        if (chain === 0) graceUsed = false;
       }
     }
   }
-  const res = { points, chain, tier: tierPoints(chain) };
+  const res = { points, chain, tier: tierPoints(chain), graceUsed, runDrops };
   _chainCache[h.id] = res;
   return res;
 }
@@ -1473,8 +1476,7 @@ function timeRow(h, today){
   const later = isDown(h) ? 'earlier' : 'later';
   const worse = isDown(h) ? 'later' : 'earlier';
   let sub;
-  if (!logged) sub = s.missed >= 2 ? 'Missed '+s.missed+' in a row'
-      : s.missed === 1 ? 'Missed yesterday, keep the record going'
+  if (!logged) sub = s.missed >= 1 ? missNote(h, s)
       : (base===null ? 'Not logged yet' : 'Not logged yet · usually '+fmtTime(Math.round(base)));
   else if (v >= NONE_MIN) sub = 'Never happened today';
   else if (base === null) sub = 'First one logged';
@@ -1497,7 +1499,7 @@ function timeRow(h, today){
         '<div><div class="sl">Usual</div><div class="sv">'+(base===null?'—':fmtTime(Math.round(base)))+'</div></div>'+
         '<div><div class="sl">Best</div><div class="sv">'+(best===null?'—':fmtTime(best))+'</div></div>'+
         '<div><div class="sl">Clean</div><div class="sv">'+clean+'/'+n30+'</div></div>'+
-      '</div>'+ fullGrid(h) + '</div>';
+      '</div>'+ '<div class="next">'+tierNote(h)+'</div>' + fullGrid(h) + '</div>';
   }
 
   const clean = logged && v >= NONE_MIN;      // marked "didn't happen" - still revocable
@@ -1520,6 +1522,27 @@ function timeRow(h, today){
     '</div>'+
     riskBlock(risk) + timeGraph(h) + dayChip(h) + expBlock +
   '</div>';
+}
+
+// The miss lines double as the only place the rules are ever explained, so they say
+// what just happened AND what happens next.
+function missNote(h, s){
+  const r = chainRun(h);
+  if (s.missed >= 2) return 'Missed '+s.missed+' in a row — each further day costs another point';
+  return r.runDrops > 0
+    ? 'Missed yesterday — your free day was already spent, so that cost a point'
+    : 'Missed yesterday — that was your one free day. The next one costs.';
+}
+
+// Where the ladder goes next, and what is riding on it.
+function tierNote(h){
+  const r = chainRun(h), t = tierOf(r.chain);
+  const grace = r.graceUsed
+    ? 'Free day spent — the next miss costs a point.'
+    : 'One free day still in hand.';
+  if (t + 1 >= TIER_DAYS.length) return 'Nothing above this. Just keep it. · '+grace;
+  const need = TIER_DAYS[t+1] - r.chain;
+  return need+' day'+(need===1?'':'s')+' to '+(t+2)+' points a day. · '+grace;
 }
 
 // What this habit is worth per logged day. Shown once it climbs above the baseline,
@@ -1555,8 +1578,7 @@ function counterRow(h, today){
   const pill = ptsPill(h) + ((mark && mark.d >= 21)
     ? '<span class="pill'+(mark.d>=90?' gold':'')+'">'+mark.d+'d</span>' : '');
 
-  const streakLine = alarm ? 'Missed '+s.missed+' in a row'
-    : warn ? 'Missed yesterday, keep the record going'
+  const streakLine = (alarm || warn) ? missNote(h, s)
     : s.streak > 0 ? s.streak+' day'+(s.streak===1?'':'s')+' logged'
     : 'Not logged yet';
 
@@ -1579,6 +1601,7 @@ function counterRow(h, today){
         '<div><div class="sl">7-day avg</div><div class="sv">'+avg+'</div></div>'+
       '</div>'+
       '<div class="next">Today '+v+' · '+logged+'/30 logged · total '+tot+'</div>'+
+      '<div class="next">'+tierNote(h)+'</div>'+
       nextLine + fullGrid(h) + '</div>';
   }
 
@@ -1681,8 +1704,7 @@ function habitRow(h){
   const risk = rowRisk(h);
   const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls + (flashIds[h.id]?' undone':'');
 
-  const streakLine = alarm ? 'Missed '+s.missed+' in a row'
-    : warn ? 'Missed yesterday \u2014 don\u2019t miss twice'
+  const streakLine = (alarm || warn) ? missNote(h, s)
     : s.streak > 0 ? s.streak+' day'+(s.streak===1?'':'s')+' running'
     : 'No streak yet';
 
@@ -1718,7 +1740,7 @@ function habitRow(h){
         '<div><div class="sl">Streak</div><div class="sv">'+s.streak+'</div></div>'+
         '<div><div class="sl">Best</div><div class="sv">'+s.best+'</div></div>'+
         '<div><div class="sl">Last 30</div><div class="sv">'+s.last30+'/30</div></div>'+
-      '</div>'+ nextLine + fullGrid(h) + '</div>';
+      '</div>'+ '<div class="next">'+tierNote(h)+'</div>' + nextLine + fullGrid(h) + '</div>';
   }
 
   return '<div class="'+cls+'">'+
