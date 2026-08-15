@@ -89,6 +89,7 @@
   .pill{font-size:10px;font-weight:600;letter-spacing:.06em;color:var(--sageDeep);
     background:rgba(122,154,126,.12);padding:3px 7px;border-radius:999px;white-space:nowrap}
   .pill.gold{color:var(--gold);background:rgba(176,141,63,.11)}
+  .pill.pts{color:var(--sageDeep);background:rgba(122,154,126,.16)}
   .streak{font-size:12px;margin-top:3px;color:var(--soft)}
   .warn .streak{color:var(--amberInk)}
   .alarm .streak{color:var(--clay);font-weight:500}
@@ -806,7 +807,9 @@ function chainRun(h){
       else if (k === keyFor(end)){ /* today is grace until tomorrow */ }
       else {
         missRun++;
-        if (missRun % 2 === 0){                 // every second consecutive miss
+        // One free day, then EVERY further missed day costs a tier, all the way down
+        // to the floor - logging is always worth 1, so the ladder cannot go negative.
+        if (missRun >= 2){
           const t = tierOf(chain);
           chain = t > 0 ? TIER_DAYS[t-1] : 0;   // back to the start of the tier below
         }
@@ -1503,7 +1506,7 @@ function timeRow(h, today){
     '<div class="top">'+
       '<div class="bigTime'+bigCls+'">'+(logged ? fmtTime(v) : '––:––')+'</div>'+
       '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
-        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span></div>'+
+        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
         '<div class="streak">'+sub+'</div>'+
       '</button>'+
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
@@ -1517,6 +1520,13 @@ function timeRow(h, today){
     '</div>'+
     riskBlock(risk) + timeGraph(h) + dayChip(h) + expBlock +
   '</div>';
+}
+
+// What this habit is worth per logged day. Shown once it climbs above the baseline,
+// so the row and the day score can never silently disagree about a habit's value.
+function ptsPill(h){
+  const n = chainRun(h).tier;
+  return n > 1 ? '<span class="pill pts">'+n+' pts</span>' : '';
 }
 
 function counterControls(h, today){
@@ -1542,8 +1552,8 @@ function counterRow(h, today){
   for (const m of STREAK_MARKS) if (s.streak >= m.d) mark = m;
   const risk = rowRisk(h);
   const cls = 'row' + (done?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls + (flashIds[h.id]?' undone':'');
-  const pill = (mark && mark.d >= 21)
-    ? '<span class="pill'+(mark.d>=90?' gold':'')+'">'+mark.d+'d</span>' : '';
+  const pill = ptsPill(h) + ((mark && mark.d >= 21)
+    ? '<span class="pill'+(mark.d>=90?' gold':'')+'">'+mark.d+'d</span>' : '');
 
   const streakLine = alarm ? 'Missed '+s.missed+' in a row'
     : warn ? 'Missed yesterday, keep the record going'
@@ -1676,8 +1686,8 @@ function habitRow(h){
     : s.streak > 0 ? s.streak+' day'+(s.streak===1?'':'s')+' running'
     : 'No streak yet';
 
-  const pill = (mark && mark.d >= 21)
-    ? '<span class="pill'+(mark.d>=90?' gold':'')+'">'+mark.d+'d</span>' : '';
+  const pill = ptsPill(h) + ((mark && mark.d >= 21)
+    ? '<span class="pill'+(mark.d>=90?' gold':'')+'">'+mark.d+'d</span>' : '');
 
   const floorBlock = alarm ? (
     '<div class="floor">'+
