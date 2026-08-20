@@ -842,6 +842,21 @@ Verified against an independent recount of the same data: span 41, paused 9 (7 l
 recorded 24 of 32 · 75%. Plus three shapes — every day paused-and-logged, a typical run
 with a short pause, and no pauses at all. → `sw.js v35`.
 
+### 2026-08-15 (later) — "0 of 0" instead of hiding the row
+v35 omitted **Days recorded** entirely when every day was paused, on the grounds that a
+percentage of nothing is meaningless. Confirmed with the user that the exclusion should
+be total — a paused day leaves both sides of the count — and that the all-paused case
+should still show, because "0 of 0" is simply the truth: no day was ever up for counting,
+and there are no countable logged days either.
+
+The row now always renders, dropping only the percentage when there is nothing to divide
+by. Silently removing a line is worse than printing an honest zero: a missing row looks
+like a bug, while "0 of 0" states the situation.
+
+Verified: live shape reads "41 days / 24 of 32 · 75% / 9 days · not counted, 7 still
+logged"; every-day-paused reads "20 days / 0 of 0 / 20 days · not counted, 20 still
+logged"; and a run with no pauses is unchanged at "13 of 20 · 65%". → `sw.js v36`.
+
 ---
 
 ## Still to do / open items

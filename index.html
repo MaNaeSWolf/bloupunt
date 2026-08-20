@@ -1765,11 +1765,12 @@ function scoreInsights(){
   });
 
   const sinceRows = [['Days since start', totalDays+' day'+(totalDays===1?'':'s')]];
-  // With every day paused there is nothing to measure against, and "0 of 1" would
-  // read as failure to someone who logged daily. The Paused row tells that story.
-  if (eligible > 0)
-    sinceRows.push(['Days recorded', counted+' of '+eligible+' · '+
-      Math.round(counted/eligible*100)+'%']);
+  // Paused days leave this count entirely, on BOTH sides. If every day was paused
+  // that is a truthful "0 of 0" - no day was ever up for counting - so say so rather
+  // than showing a percentage of nothing.
+  sinceRows.push(['Days recorded', eligible > 0
+    ? counted+' of '+eligible+' · '+Math.round(counted/eligible*100)+'%'
+    : '0 of 0']);
   if (pausedDays)
     sinceRows.push(['Paused', pausedDays+' day'+(pausedDays===1?'':'s')+' \u00b7 not counted'+
       (pausedLogged ? ', '+pausedLogged+' still logged' : '')]);
