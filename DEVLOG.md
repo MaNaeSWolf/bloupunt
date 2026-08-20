@@ -607,6 +607,139 @@ recorded the day is definitionally not clean, and a mis-tap is fixed through the
 chip. The chain is unaffected either way, since the day was already logged.
 → `sw.js v24`.
 
+### 2026-08-10 (later) — Universal session undo
+A small icon button right of Manage, undoing the last 10 changes. Universal rather than
+per-card: an accidental "Log now" was the trigger, but a mis-tapped tick, a bumped
+counter, a deleted habit, a reorder or a pause share the problem.
+
+**One hook, not fifteen.** `save()` is the only path a change takes to storage, so the
+snapshot of the state *before* a change is captured there and every action is covered
+without touching any of them. `save(undoable=false)` marks changes that are not a user
+action in their own right — the `seen{}` write trailing a milestone, and a sync merge —
+so one tap never costs two undos. Snapshots are whole serialized `data` objects held in
+memory only and **never written to localStorage**, so the history dies with the tab.
+`prevSnap` is seeded at boot so the first action of a session is already undoable.
+
+Verified: accidental log undone and the button re-disables; the stack caps at 10; one
+tap costs exactly one undo even when a milestone fires; a deleted habit returns with all
+5 of its logged days; a reorder reverts; a reload drops a 9-deep stack to zero with
+nothing added to the stored keys. → `sw.js v25`.
+
+### 2026-08-10 (later) — Undo feedback without the layout jolt
+The "Undone." banner pushed every card down as it appeared and let them snap back as it
+went — exactly the movement this app otherwise avoids. Replaced with a green outline on
+the cards that actually changed, held 2s.
+
+Undo diffs the habit list either side of the restore and outlines only the ids whose
+serialized form differs, so a restored deletion lights the card that came back and
+untouched rows stay clean. Uses `outline` rather than a thicker `border`, because an
+outline draws outside the layout box — growing a 1px border to 2px would resize the card
+and nudge its contents, reintroducing the problem in miniature. Every `.row` carries a
+transparent 2px outline by default so only the *colour* changes, letting it fade both
+ways. Verified: card positions identical before, during and after; box unchanged at
+328×110; only the affected card outlined. → `sw.js v26`.
+
+### 2026-08-10 (later) — Louder undo cue, and a sync button replacing the banner
+Reported as "the implementation did not work". It was working — verified on the live
+build, the class and `outline: rgb(122,154,126) 2px` were both applying. It was simply
+**too subtle to notice**: a 2px sage line over an existing 1px hairline border for two
+seconds. A reminder that "correct" and "perceptible" are different tests, and only the
+second one matters for a cue. Now 3px with a soft outer glow and a faint green card
+tint — still outline/shadow only, so nothing moves.
+
+**The "Sync failed" banner had the identical flaw** and is gone. Its job now belongs to a
+small italic Fraunces **S** beside Undo: **red** failed or token expired, **green** synced
+with nothing pending, **ink** idle, muted while syncing. Tap to sync (`flushPush()` then
+`pullRemote()`), or open the settings if sync was never configured. `setSyncStatus`
+repaints the glyph in place rather than re-rendering; the full explanation still lives in
+the tooltip and the Manage panel. Verified: all four header buttons fit exactly at 360px
+with no overflow. → `sw.js v27`.
+
+### 2026-08-15 — Miss ladder tightened, and the points made visible
+Two reports: skipping felt free, and a habit paid 2 points before day 14. Testing showed
+one root cause behind both — **`chain` was a lifetime count of logged days, not a current
+run.** A lone miss cost nothing *and* did not interrupt progress, so 15 days logged across
+17 read as chain 15 (2 points) while the card honestly said "4 days running".
+
+New penalty: **one free day, then every further consecutive missed day costs a point**,
+down to a floor of 1 — logging is always worth something, so the ladder cannot go
+negative. Verified from a 300-day habit (6 points), counting days since the last log:
+grace → 6, one miss → 6, then 5, 4, 3, 2, 1, holding at 1. Clean runs exact again: 12 and
+13 days pay 1, 14 pays 2.
+
+Added a **points pill** to every row type showing what a habit is worth once above the
+baseline, so the card and the day score can never silently disagree again — which is what
+made the original report so hard to see. → `sw.js v28`.
+
+### 2026-08-15 (later) — One grace per chain, and copy that teaches the rules
+Closed the loophole above: the free day is granted **once per chain**, not per gap. Spend
+it and every missed day after costs a point, down to the floor. Falling to the floor is a
+fresh start, so the grace returns with the new chain.
+
+Verified — logging every other day for 40 days now pays **1 point** (it was 2, with a
+streak of 1); 15 logs across 17 with two lone misses drops to 1; a *single* forgiven miss
+still holds the full chain (15 days, 2 points); clean runs unchanged at 13 → 1 and 14 → 2.
+The consecutive ladder from a 300-day habit is unchanged: 6, 6, 5, 4, 3, 2, 1.
+
+**Copy.** The rules are now non-obvious enough that they have to be taught somewhere, so
+the moments where they bite do the teaching. `missNote()` says what just happened *and*
+what happens next — "that was your one free day. The next one costs.", "your free day was
+already spent, so that cost a point". `tierNote()` in every expanded view gives the next
+rung and the grace state — "16 days to 3 points a day. · One free day still in hand." At
+the top of the ladder it reads "Nothing above this. Just keep it." Written in the app's
+own voice rather than quoted, per the earlier decision.
+
+**Worth watching in use:** one grace for the whole life of a chain is severe by design.
+An eight-month chain gets a single free day ever, and after that ordinary life bleeds it
+down a point at a time. If that proves too punishing, the softest fix is restoring the
+grace on reaching a new tier rather than only at the floor. → `sw.js v29`.
+
+### 2026-08-15 (later) — Time-card height, weekday labels, score insights
+**The unlogged time card was enormous.** Another **class-name collision**: the modifier
+`.bigTime.empty` picked up `.empty`, the *empty-state card* rule, inheriting
+`padding:44px 28px` and a border. Inside a 58px box that leaves no content width, so
+`––:––` wrapped onto five lines and the box stood 111px tall. Renamed the modifier to
+`.blank` and added `white-space:nowrap`. The box is now **21px**, the whole card 251px →
+**180px**. (Third collision in this project after `.seg` and `.empty` — the stylesheet is
+one flat namespace and short modifier names are the weak point.)
+
+**Weekday labels** run down the left of every month grid, habit and score alike
+(`dowCol()`, Monday-first to match the column layout). Verified aligned to the cell rows
+within 2px, with no grid or page overflow.
+
+**Score insights** in the expanded score card, computed only over days actually recorded.
+Each line carries its own sample threshold and stays hidden until the data supports it.
+→ `sw.js v30`.
+
+### 2026-08-15 (later) — Day 1 means first log, and the stats grow up
+**`habitStart()` now means the first day actually LOGGED**, not the day the habit was
+created. The creation date is meaningless if nothing was ever recorded against it, and
+the days between creating a habit and first using it were being counted as *misses* —
+penalising a chain that had not started. This also removes the need for the 2020-epoch id
+guard added in v30, since no id arithmetic remains.
+
+**Totals count every calendar day since that first log, gaps included** — a gap is part
+of the record, not missing data. Verified against the reported case: two days logged, a
+week off, one more later reads "Since you started · 21 days" and "Days recorded: 8 of 21
+· 38%".
+
+**Pattern stats use the shorter of your whole history and the last 13 weeks** (91 days,
+one screen of month grid), so "strongest day", "most kept" and "needs work" describe how
+you are now rather than a year ago. Confirmed: 200 days of history reports "Since you
+started · 200 days" for totals but "Last 13 weeks" for patterns, and the heading degrades
+honestly to "Last 4 weeks" when that is all there is.
+
+Grouped into three sections — **Since you started** (days recorded, every-habit-logged
+days, points earned and per-day average, best day with date), **Lately** (this week, last
+week, this month, last month, each an average with the recorded-day count behind it, so a
+part-finished week is not compared unfairly against a complete one), and **Last 13 weeks**
+(strongest and weakest weekday, best week, most-kept and needs-work habit, longest chain).
+
+Thresholds: nothing under 7 logged days, weekday claims only with 3+ weekdays at 2+
+samples and a ≥0.5 gap, best-week only across 2+ weeks with 3+ days each, kept-rates only
+over a 7-day span, and each habit measured against its own span inside the window.
+→ `sw.js v31`.
+
 ---
 
 ## Still to do / open items
