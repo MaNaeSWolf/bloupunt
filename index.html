@@ -119,7 +119,7 @@
   .sBtn.bad{color:var(--clay);border-color:#E7C9BE}
   .sBtn.idle,.sBtn.off{color:var(--ink)}
   .sBtn.busy{color:var(--soft)}
-  .bar.paused,.cell.paused{box-shadow:inset 0 0 0 1.5px #CBDCCD}
+  .bar.paused,.cell.paused{box-shadow:inset 0 0 0 1.5px #A2BECE}
   .pauseCard{background:var(--card);border:1px solid var(--sage);border-radius:16px;padding:15px 16px;margin-bottom:16px}
   .pauseHint{font-size:13px;color:var(--soft);line-height:1.55;margin-bottom:12px}
   .pauseHint strong{color:var(--ink)}
@@ -307,6 +307,10 @@ const CTR_RED='#C0836B', CTR_MID='#EDE9E2', CTR_GRN='#7A9A7E';
 // paused. Deliberately a darker neutral grey so it reads apart from both the
 // gradient and an untouched day (before the habit existed, paused, or still today).
 const MISSED = '#C8C2B8';
+// A paused day is neither kept nor missed, so it gets its own hue rather than a
+// shade of either. Soft dusty blue: cool against a warm palette, so it reads at a
+// glance on every calendar without shouting.
+const PAUSED_FILL = '#C3D5E0', PAUSED_RING = '#A2BECE';
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // Ambient background. Nothing before day 14 — the room warms only once earned.
@@ -717,7 +721,7 @@ function avg7(h, d){
 // stay the neutral untouched tone.
 function unloggedShade(h, d){
   const k = keyFor(d);
-  if ((data.paused || {})[k]) return LEV[0];
+  if ((data.paused || {})[k]) return PAUSED_FILL;
   const start = habitStart(h);
   if (start && d < start) return LEV[0];
   if (d >= midnight()) return LEV[0];
@@ -942,7 +946,11 @@ function perfectStreak(){
 // intensity ramp and no missed-grey - done is done, everything else is untouched.
 // (The missed-grey and gradient live on counters, where legibility needs them.)
 function shade(h, d){
-  return has(h.days || {}, keyFor(d)) ? LEV[3] : LEV[0];
+  const k = keyFor(d);
+  if (has(h.days || {}, k)) return LEV[3];
+  // Still two-state for kept/not-kept - no missed-grey on a toggle - but a paused day
+  // is a third thing and gets the shared blue, same as every other calendar.
+  return (data.paused || {})[k] ? PAUSED_FILL : LEV[0];
 }
 
 function currentTier(){
@@ -1265,7 +1273,7 @@ const CHEV_SVG = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none">'+
 // reads. A missed day is a gap in the bar (the break lands); a paused day is bridged
 // (a lighter segment keeps the bar going) so an intentional break isn't a failure.
 const N_DAYS = 21;
-const PAUSE_SEG = '#DEE4DD';
+const PAUSE_SEG = '#C3D5E0';
 function chainStrip(h){
   const today = todayKey();
   const counter = isCounter(h), col = counter ? counterScale(h) : null;
@@ -1298,7 +1306,9 @@ function chainStrip(h){
     if (x.today && !x.logged){
       inner = '<div class="tdot"></div>';                       // today, not yet logged
     } else if (!inRun[i]){
-      inner = '<div class="seg gap"></div>';                    // missed / untouched: just the track
+      inner = x.paused
+        ? '<div class="seg s4" style="background:'+PAUSED_FILL+';height:9px"></div>'
+        : '<div class="seg gap"></div>';                  // missed / untouched: just the track
     } else {
       const first = !inRun[i-1], last = !inRun[i+1];
       const shape = first&&last ? 's4' : first ? 's1' : last ? 's3' : 's2';
@@ -1472,7 +1482,7 @@ function timeGraph(h){
     if (!x.logged){
       const y = GH - GPAD - (GH - GPAD*2)/2;
       const c = x.today ? '<circle cx="'+cx+'" cy="'+y+'" r="3.2" fill="none" stroke="var(--soft)" stroke-width="1.4"/>'
-        : '<circle cx="'+cx+'" cy="'+y+'" r="1.6" fill="'+(x.paused?'#CBDCCD':'var(--hair)')+'"/>';
+        : '<circle cx="'+cx+'" cy="'+y+'" r="'+(x.paused?2.8:1.6)+'" fill="'+(x.paused?PAUSED_FILL:'var(--hair)')+'"/>';
       return c + hit;
     }
     const r = x.sel ? 5 : 4;
@@ -1656,7 +1666,11 @@ function scoreRow(h){
   // 14 days, not 21: the bubbles carry a number, so they need the width to stay legible.
   const bubbles = windowDays(14).map(d => {
     const k = keyFor(d), t = k===today;
-    if (!dayHasLog(k)) return '<div class="sslot">'+(t?'<div class="tdot"></div>':'<div class="sbub off"></div>')+'</div>';
+    if (!dayHasLog(k)){
+      const pz = (data.paused || {})[k];
+      return '<div class="sslot">'+(t ? '<div class="tdot"></div>'
+        : '<div class="sbub off"'+(pz?' style="background:'+PAUSED_FILL+'"':'')+'></div>')+'</div>';
+    }
     const v = dayScore(k);
     const bi = q(v);
     return '<div class="sslot"><div class="sbub" style="background:'+bandColourIdx(bi)+';color:'+bandInkIdx(bi)+'">'+v+'</div></div>';
@@ -1857,7 +1871,8 @@ function scoreGrid(q){
   const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
     const future = d > now, k = keyFor(d);
     if (future) return '<div class="scell future"></div>';
-    if (!dayHasLog(k)) return '<div class="scell"></div>';
+    if (!dayHasLog(k))
+      return '<div class="scell"'+((data.paused || {})[k]?' style="background:'+PAUSED_FILL+'"':'')+'></div>';
     const v = dayScore(k);
     const bi = q(v);
     return '<div class="scell" style="background:'+bandColourIdx(bi)+';color:'+bandInkIdx(bi)+'">'+v+'</div>';

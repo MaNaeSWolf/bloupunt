@@ -766,6 +766,30 @@ against an independent walk of the same data: span 42, recorded 29, paused 6 —
 and "25 days in a row". Under the old code the same data would have read "29 of 36".
 → `sw.js v32`.
 
+### 2026-08-15 (later) — Paused days get their own colour
+A paused day was drawn as plain paper with a pale sage ring, which disappeared against
+the background and read as brownish next to the missed grey. It is neither kept nor
+missed, so it now has its own hue rather than a shade of one of them: **soft dusty blue**
+(`PAUSED_FILL` `#C3D5E0`, ring `#A2BECE`) — cool against an otherwise warm palette, so it
+separates at a glance without shouting.
+
+Applied at all eight places a paused day can be drawn, from one shared constant:
+`unloggedShade()` (habit month grids and the counter/time strips), the ribbon's bridge
+segment, a standalone upcoming pause in the ribbon (previously an invisible gap), the
+time-graph dot (also enlarged 1.6 → 2.8px so it is not lost), the score card's week
+bubbles and month cells, and the cell ring.
+
+`shade()` needed its own fix: it had been two-state since the solid-green toggle change,
+returning kept-or-neutral without ever consulting `unloggedShade`, so **toggle** month
+grids alone stayed paper. It now returns green / blue / neutral — still no missed-grey on
+a toggle, since that distinction was deliberately dropped there.
+
+Verified across every surface with five paused days seeded mid-history: all four month
+grids (toggle, counter, time, score), both ribbon styles, the time graph and the score
+bubbles each render exactly 5 blue. A first pass reported 0 for the habit grids — that
+was the test, not the app: only one row can be expanded at a time, so clicking all four
+chevrons left just the last one open. → `sw.js v33`.
+
 ---
 
 ## Still to do / open items
