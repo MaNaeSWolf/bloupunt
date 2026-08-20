@@ -1719,19 +1719,40 @@ function scoreInsights(){
   const span = (from,to) => all.filter(x => x.d >= from && x.d <= to && x.logged);
   const sections = [];
 
-  /* ---- since you started ---- */
-  const eligible = all.filter(x => !x.paused).length;
-  const totalPts = active.reduce((s,x)=>s+x.score,0);
-  const bestDay  = active.reduce((a,b)=> b.score > a.score ? b : a);
-  const perfect  = active.filter(x => x.perfect).length;
+  /* ---- since you started ----
+     Everything here is measured against EVERY calendar day since day 1, gaps and all.
+     Paused days used to be quietly removed from the denominator, which made the figure
+     look wrong to anyone who had forgotten they paused - a hidden exclusion is worse
+     than none, so they are counted and then shown on their own line. */
+  const totalDays  = all.length;
+  const pausedDays = all.filter(x => x.paused).length;
+  const totalPts   = active.reduce((s,x)=>s+x.score,0);
+  const perfect    = active.filter(x => x.perfect).length;
+
+  // The best score you have ever reached, and how often you have reached it - naming a
+  // single date just points at whichever max happened last, which says nothing.
+  const bestScore = active.reduce((m,x)=> x.score > m ? x.score : m, 0);
+  const bestCount = active.filter(x => x.score === bestScore).length;
+
+  // Longest unbroken run of days with anything logged. A paused day bridges the run.
+  let runBest = 0, runNow = 0;
+  all.forEach(x => {
+    if (x.logged){ runNow++; if (runNow > runBest) runBest = runNow; }
+    else if (!x.paused) runNow = 0;
+  });
+
   const sinceRows = [
-    ['Days recorded', active.length+' of '+eligible+' \u00b7 '+Math.round(active.length/eligible*100)+'%'],
-    ['Points earned', totalPts+' \u00b7 '+(Math.round(totalPts/active.length*10)/10)+' a day'],
-    ['Best day', bestDay.score+' pt'+(bestDay.score===1?'':'s')+' · '+fmtDay(bestDay.d)]
+    ['Days recorded', active.length+' of '+totalDays+' \u00b7 '+Math.round(active.length/totalDays*100)+'%']
   ];
+  if (pausedDays)
+    sinceRows.push(['Paused', pausedDays+' of those day'+(pausedDays===1?'':'s')]);
   if (habits.length > 1)
-    sinceRows.splice(1, 0, ['Every habit logged', perfect+' day'+(perfect===1?'':'s')]);
-  sections.push({ title:'Since you started \u00b7 '+all.length+' days', rows: sinceRows });
+    sinceRows.push(['Every habit logged', perfect+' day'+(perfect===1?'':'s')]);
+  sinceRows.push(['Longest run', runBest+' day'+(runBest===1?'':'s')+' in a row']);
+  sinceRows.push(['Points earned', totalPts+' \u00b7 '+(Math.round(totalPts/totalDays*10)/10)+' a day']);
+  sinceRows.push(['Best score', bestScore+' pt'+(bestScore===1?'':'s')+' \u00b7 reached on '+
+    bestCount+' day'+(bestCount===1?'':'s')]);
+  sections.push({ title:'Since you started \u00b7 '+totalDays+' days', rows: sinceRows });
 
   /* ---- this week and this month ---- */
   const tw = mondayOf(end), lw = new Date(tw); lw.setDate(tw.getDate()-7);

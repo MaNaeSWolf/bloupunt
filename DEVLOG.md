@@ -740,6 +740,32 @@ samples and a ≥0.5 gap, best-week only across 2+ weeks with 3+ days each, kept
 over a 7-day span, and each habit measured against its own span inside the window.
 → `sw.js v31`.
 
+### 2026-08-15 (later) — Honest denominators in the score card
+Reported as "days recorded is not working" — the card read **30 of 32** after a start with
+a four-day burst and a two-week gap. The arithmetic was right; the *framing* was not.
+`eligible` quietly removed paused days from the denominator, so nine excused days had
+silently vanished and the figure looked broken to someone who had forgotten pausing at
+all. **A hidden exclusion is worse than no exclusion**: it produces a number nobody can
+reconcile against what they remember.
+
+- **Days recorded** is now measured against every calendar day since day 1, gaps and all.
+- **Paused** appears on its own line when there are any, so the excused days are visible
+  rather than silently netted off.
+- **Points earned** divides by that same full span, so "a day" means per calendar day
+  rather than per recorded day — the two differ sharply on a patchy history.
+- **Best day** became **Best score**: the highest score ever reached and *how many days
+  reached it*. Naming a single date just pointed at whichever maximum happened last,
+  which says nothing when there are several.
+- Added **Longest run** — the longest unbroken stretch of days with anything logged, with
+  paused days bridging rather than breaking it.
+
+Verified against a dataset shaped like the report (a four-day false start 41 days ago, a
+two-week gap, then steady logging, plus a deliberate six-day pause) and cross-checked
+against an independent walk of the same data: span 42, recorded 29, paused 6 — rendering
+"29 of 42 · 69%", "Paused: 6 of those days", "77 · 1.8 a day", "4 pts · reached on 6 days"
+and "25 days in a row". Under the old code the same data would have read "29 of 36".
+→ `sw.js v32`.
+
 ---
 
 ## Still to do / open items
