@@ -815,6 +815,33 @@ Verified with nine paused days of which seven were also logged: all three grids 
 paused-classed cells, 9 visible rings and 2 blue fills, and the stat line reads as above.
 → `sw.js v34`.
 
+### 2026-08-15 (later) — Pauses stop penalising "Days recorded"
+Once v34 made pauses visible, the earlier v32 decision was clearly the wrong one: v32
+had put paused days *into* the denominator, so declaring a break in advance quietly cut
+your percentage. Both framings had been tried and both were wrong on their own — hiding
+the pauses (pre-v32) made the number unreconcilable, counting them (v32) made it unfair.
+
+The fix is to separate the two questions instead of forcing one number to answer both:
+
+- **Days since start** — the raw calendar span from day 1, gaps and all.
+- **Days recorded** — measured only over days a pause did not excuse.
+
+A pause now leaves **both sides** of that ratio. Counting a paused-but-logged day in the
+numerator only could push the figure past 100%, and dropping it from the numerator while
+keeping it in the denominator is the penalty we were removing. The **Paused** row carries
+the rest of the story: "9 days · not counted, 7 still logged".
+
+The per-day points rate divides by the same eligible span, so a declared break does not
+drag it down either.
+
+Edge case found in testing: with *every* day paused, `eligible` is 0 and the row read
+"0 of 1 · 0%" — failure, to someone who had logged daily. The ratio is now omitted
+entirely when there is nothing to measure against; the Paused row already explains it.
+
+Verified against an independent recount of the same data: span 41, paused 9 (7 logged),
+recorded 24 of 32 · 75%. Plus three shapes — every day paused-and-logged, a typical run
+with a short pause, and no pauses at all. → `sw.js v35`.
+
 ---
 
 ## Still to do / open items

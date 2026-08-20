@@ -1740,9 +1740,15 @@ function scoreInsights(){
      Paused days used to be quietly removed from the denominator, which made the figure
      look wrong to anyone who had forgotten they paused - a hidden exclusion is worse
      than none, so they are counted and then shown on their own line. */
-  const totalDays  = all.length;
+  const totalDays    = all.length;
   const pausedDays   = all.filter(x => x.paused).length;
   const pausedLogged = all.filter(x => x.paused && x.logged).length;
+  // A pause means the day does not count either way, so it leaves BOTH sides of the
+  // ratio. Counting it only in the denominator penalised you for taking a break you
+  // had declared in advance; counting a logged pause only in the numerator could push
+  // the figure past 100%. "Days since start" keeps the raw span visible either way.
+  const eligible   = totalDays - pausedDays;   // 0 only if literally every day was paused
+  const counted    = all.filter(x => x.logged && !x.paused).length;
   const totalPts   = active.reduce((s,x)=>s+x.score,0);
   const perfect    = active.filter(x => x.perfect).length;
 
@@ -1758,19 +1764,23 @@ function scoreInsights(){
     else if (!x.paused) runNow = 0;
   });
 
-  const sinceRows = [
-    ['Days recorded', active.length+' of '+totalDays+' \u00b7 '+Math.round(active.length/totalDays*100)+'%']
-  ];
+  const sinceRows = [['Days since start', totalDays+' day'+(totalDays===1?'':'s')]];
+  // With every day paused there is nothing to measure against, and "0 of 1" would
+  // read as failure to someone who logged daily. The Paused row tells that story.
+  if (eligible > 0)
+    sinceRows.push(['Days recorded', counted+' of '+eligible+' · '+
+      Math.round(counted/eligible*100)+'%']);
   if (pausedDays)
-    sinceRows.push(['Paused', pausedDays+' of '+totalDays+' days'+
-      (pausedLogged ? ' \u00b7 '+pausedLogged+' still logged' : '')]);
+    sinceRows.push(['Paused', pausedDays+' day'+(pausedDays===1?'':'s')+' \u00b7 not counted'+
+      (pausedLogged ? ', '+pausedLogged+' still logged' : '')]);
   if (habits.length > 1)
     sinceRows.push(['Every habit logged', perfect+' day'+(perfect===1?'':'s')]);
   sinceRows.push(['Longest run', runBest+' day'+(runBest===1?'':'s')+' in a row']);
-  sinceRows.push(['Points earned', totalPts+' \u00b7 '+(Math.round(totalPts/totalDays*10)/10)+' a day']);
+  sinceRows.push(['Points earned', totalPts+' · '+
+    (Math.round(totalPts/(eligible || totalDays)*10)/10)+' a day']);
   sinceRows.push(['Best score', bestScore+' pt'+(bestScore===1?'':'s')+' \u00b7 reached on '+
     bestCount+' day'+(bestCount===1?'':'s')]);
-  sections.push({ title:'Since you started \u00b7 '+totalDays+' days', rows: sinceRows });
+  sections.push({ title:'Since you started', rows: sinceRows });
 
   /* ---- this week and this month ---- */
   const tw = mondayOf(end), lw = new Date(tw); lw.setDate(tw.getDate()-7);
