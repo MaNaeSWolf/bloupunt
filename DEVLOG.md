@@ -790,6 +790,31 @@ bubbles each render exactly 5 blue. A first pass reported 0 for the habit grids 
 was the test, not the app: only one row can be expanded at a time, so clicking all four
 chevrons left just the last one open. → `sw.js v33`.
 
+### 2026-08-15 (later) — Paused days that were also logged were undrawable
+v33 coloured paused days blue, but a user with nine paused days still saw none of them.
+The blue was correct and reachable — it just could not apply to *their* nine, because of
+three faults that all hid the same case: **a paused day you also logged**.
+
+- `fullGrid` only added the `paused` class when `!has(h.days,k)`, so pausing and then
+  logging anyway produced no marker at all. That is the common case: pause does not stop
+  you recording, and it is exactly when you lose track of your own breaks.
+- `scoreGrid` never carried the class in either branch — it only set an inline fill for
+  unlogged days.
+- The ring rule sat *before* `.cell.marked` at equal specificity, so even where the class
+  was applied, a logged day's dark marked ring won and the pause disappeared.
+
+Now every paused day carries the class in all three grids, the ring is defined after
+`.marked` so it wins, and `.scell.paused` is covered. Blue **fill** still means paused
+and unlogged; a blue **ring** means paused, whether or not the day was logged.
+
+The stat was ambiguous for the same reason — "9 of those days" alongside "31 of 41
+recorded" implied the pauses explained the gap, when most were logged days. It now reads
+**"9 of 41 days · 7 still logged"**.
+
+Verified with nine paused days of which seven were also logged: all three grids report 9
+paused-classed cells, 9 visible rings and 2 blue fills, and the stat line reads as above.
+→ `sw.js v34`.
+
 ---
 
 ## Still to do / open items
