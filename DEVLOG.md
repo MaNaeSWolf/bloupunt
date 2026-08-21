@@ -934,6 +934,33 @@ second is worth anything to the person reading it. Verified by reproducing the e
 card (chain 14, streak 5, 2 pts) and checking a plural milestone reads "Streak · 4 days
 to two weeks". → `sw.js v39`.
 
+### 2026-08-15 (later) — Expanded cards reordered, and a ring around a paying chain
+
+**Order.** Every expanded card now follows the score card's shape, which was always the
+better one: context first, then the calendar, then the numbers that describe it. The
+calendar is the thing you open a card to look at, so it should not sit at the bottom
+under four lines of text.
+
+    When and where → The floor → CALENDAR → Streak/Best/Last 30 →
+    Strongest / weakest day → Streak · N days to … → Chain … → Free day …
+
+Applied identically to toggle, counter and time cards (each keeps its own stat trio —
+Streak/Best/Last 30, Streak/Best/7-day avg, Usual/Best/Clean).
+
+**Chain ring.** A run that is earning *extra* points is now outlined on the ribbon, so a
+chain worth more than 1pt/day reads as one object rather than separate blocks. The ring
+spans paused days and the single grace gap, because that is exactly what the chain
+itself spans — it is the visual answer to "why is this worth 2 points when the blocks
+are broken?". A plain streak at tier 1 earns nothing extra and deliberately gets no
+ring, so the treatment always means something.
+
+When the run extends past the visible window the ring **squares off with an open left
+edge**, rather than pretending the chain starts at the first visible day.
+
+Verified across three shapes: a 14-day chain with a grace gap rings from 28.57% for
+71.43% and bridges the gap; a plain 5-day streak (tier 1) gets no ring at all; a 40-day
+chain rings the full width with `openL` set. → `sw.js v40`.
+
 ---
 
 ## Still to do / open items

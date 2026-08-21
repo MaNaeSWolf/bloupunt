@@ -151,6 +151,9 @@
      logged, which is precisely when people lose track of their own breaks. */
   .bar.paused,.cell.paused,.scell.paused{box-shadow:inset 0 0 0 2px #A2BECE}
   .ribbon{position:relative;margin:14px 0 0 44px;height:22px}
+  .chainRing{position:absolute;top:0;height:100%;border:1.5px solid var(--sageDeep);
+    border-radius:11px;opacity:.45;pointer-events:none;z-index:2}
+  .chainRing.openL{border-left:none;border-radius:0 11px 11px 0}
   .rtrack{position:absolute;left:2px;right:2px;top:50%;height:4px;transform:translateY(-50%);background:var(--hair);border-radius:2px}
   .rrow{position:relative;display:flex;height:100%;z-index:1}
   .rslot{flex:1;display:grid;place-items:center;cursor:pointer}
@@ -1330,7 +1333,32 @@ function chainStrip(h){
       'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}">'+inner+'</div>';
   }).join('');
 
-  return '<div class="ribbon"><div class="rtrack"></div><div class="rrow">'+cells+'</div></div>';
+  // Ring the run that is currently earning EXTRA points, so a chain worth more than
+  // 1pt/day reads as one object rather than separate blocks. It spans paused days and
+  // the single grace gap, because that is exactly what the chain itself spans. A plain
+  // 5-day streak earns nothing extra and gets no ring.
+  let ring = '';
+  if (chainRun(h).tier > 1){
+    let i = N_DAYS - 1;
+    if (!info[i].logged && !info[i].paused) i--;          // today is grace until tomorrow
+    if (i >= 0 && (info[i].logged || info[i].paused)){
+      const last = i;
+      let bridged = false;
+      while (i >= 0){
+        if (info[i].logged || info[i].paused){ i--; continue; }
+        if (!bridged){ bridged = true; i--; continue; }   // the one free day
+        break;
+      }
+      const openLeft = i < 0;                             // runs off the visible window
+      let first = i + 1;
+      while (first < last && !info[first].logged) first++;
+      const l = (first / N_DAYS) * 100, w = ((last - first + 1) / N_DAYS) * 100;
+      ring = '<div class="chainRing'+(openLeft?' openL':'')+'" style="left:'+l.toFixed(2)+
+        '%;width:'+w.toFixed(2)+'%"></div>';
+    }
+  }
+  return '<div class="ribbon"><div class="rtrack"></div>'+ring+
+    '<div class="rrow">'+cells+'</div></div>';
 }
 
 const DOW_SHORT = ['M','T','W','T','F','S','S'];
@@ -1539,12 +1567,14 @@ function timeRow(h, today){
     let clean = 0, n30 = 0; const c2 = midnight();
     for (let i=0;i<30;i++){ const k = keyFor(c2); if (has(h.days,k)){ n30++; if (h.days[k] >= NONE_MIN) clean++; } c2.setDate(c2.getDate()-1); }
     const best = past.length ? (isDown(h) ? Math.min(...past) : Math.max(...past)) : null;
-    expBlock = '<div class="exp">'+ details +
+    const statBlock =
       '<div class="stats">'+
         '<div><div class="sl">Usual</div><div class="sv">'+(base===null?'—':fmtTime(Math.round(base)))+'</div></div>'+
         '<div><div class="sl">Best</div><div class="sv">'+(best===null?'—':fmtTime(best))+'</div></div>'+
         '<div><div class="sl">Clean</div><div class="sv">'+clean+'/'+n30+'</div></div>'+
-      '</div>'+ chainNote(h) + dayStatsBlock(h) + fullGrid(h) + '</div>';
+      '</div>';
+    expBlock = '<div class="exp">'+ details + fullGrid(h) + statBlock +
+      dayStatsBlock(h) + chainNote(h) + '</div>';
   }
 
   const clean = logged && v >= NONE_MIN;      // marked "didn't happen" - still revocable
@@ -1710,15 +1740,15 @@ function counterRow(h, today){
     for (let i=0;i<30;i++){ const k=keyFor(c2); if (has(h.days,k)){ tot+=h.days[k]; logged++; } c2.setDate(c2.getDate()-1); }
     let nextLine=''; const nx = STREAK_MARKS.find(m => m.d > s.streak);
     if (nx && s.streak >= 3){ const away = nx.d - s.streak; nextLine = '<div class="next">Streak · '+away+' day'+(away===1?'':'s')+' to '+nx.label.toLowerCase()+'</div>'; }
-    expBlock = '<div class="exp">'+ details +
+    const statBlock =
       '<div class="stats">'+
         '<div><div class="sl">Streak</div><div class="sv">'+s.streak+'</div></div>'+
         '<div><div class="sl">Best</div><div class="sv">'+s.best+'</div></div>'+
         '<div><div class="sl">7-day avg</div><div class="sv">'+avg+'</div></div>'+
       '</div>'+
-      '<div class="next">Today '+v+' · '+logged+'/30 logged · total '+tot+'</div>'+
-      chainNote(h)+ dayStatsBlock(h)+
-      nextLine + fullGrid(h) + '</div>';
+      '<div class="next">Today '+v+' · '+logged+'/30 logged · total '+tot+'</div>';
+    expBlock = '<div class="exp">'+ details + fullGrid(h) + statBlock +
+      dayStatsBlock(h) + nextLine + chainNote(h) + '</div>';
   }
 
   return '<div class="'+cls+'">'+
@@ -2024,12 +2054,14 @@ function habitRow(h){
       nextLine = '<div class="next">Streak · '+away+' day'+(away===1?'':'s')+' to '+nx.label.toLowerCase()+'</div>';
     }
 
-    expBlock = '<div class="exp">'+ details +
+    const statBlock =
       '<div class="stats">'+
         '<div><div class="sl">Streak</div><div class="sv">'+s.streak+'</div></div>'+
         '<div><div class="sl">Best</div><div class="sv">'+s.best+'</div></div>'+
         '<div><div class="sl">Last 30</div><div class="sv">'+s.last30+'/30</div></div>'+
-      '</div>'+ chainNote(h) + dayStatsBlock(h) + nextLine + fullGrid(h) + '</div>';
+      '</div>';
+    expBlock = '<div class="exp">'+ details + fullGrid(h) + statBlock +
+      dayStatsBlock(h) + nextLine + chainNote(h) + '</div>';
   }
 
   return '<div class="'+cls+'">'+
