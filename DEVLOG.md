@@ -1240,6 +1240,43 @@ the same day; the post-layout clamp from v46 handles the edges unchanged. → `s
 Also confirmed today: the v47 sync fix works. Both devices took the update, one rename
 on the phone, and the two now agree.
 
+### 2026-08-21 (later) — The card stops moving
+
+Three fixes, and the third is the one that mattered.
+
+**The time card loses its left column.** The big readout spent most of its life showing
+`––:––` — 58px reserved for a placeholder. Its one honest moment, today's logged time,
+moved onto the button that already reports the same fact ("Logged 14:05"), so nothing is
+lost and the name now starts at the card edge. The two action buttons stack beside it
+instead of taking a row of their own. They were spread far apart originally to make a
+mis-tap unlikely; undo and calendar editing both cover that now, so the separation was
+costing height and buying nothing. A collapsed card goes from three bands to two.
+
+**The selection ring was being clipped.** `.gridWrap{overflow-x:auto}` computes
+`overflow-y` to `auto` as well — one axis cannot scroll while the other stays visible —
+so the box cropped the 3px the outline draws *outside* the bottom row of cells. 3px of
+padding inside the scroll box gives it somewhere to land without moving a single cell.
+The score grid had the same bug for the same reason.
+
+**The bubble stops shoving the page around.** It used to reserve headroom, so every tap
+pushed the card down and every dismiss pulled it back up — reading three days in a row
+felt like the page was fighting you. It now draws *over* whatever is above it, and earns
+that by clearing itself: three seconds, or the first tap anywhere that is not another
+day. A peek is a glance, not a mode; it should never need putting away. Tapping a
+different day moves it rather than closing it, and it never auto-clears while the day
+chip is open — that selection belongs to an editing session in progress.
+
+One trap worth recording: the dismiss listener runs in the capture phase, so a naive
+`render()` there would tear the DOM out from under a click still travelling to whatever
+was tapped — the chevron would stop opening cards. Deferring the re-render by a tick
+fixes it, and there is now a test that taps the chevron with a bubble up and asserts the
+card still toggles.
+
+Verified: card height and graph position unchanged when a bubble appears; the ring
+clears the grid edge by exactly 3px on both calendars; the bubble is up at 2s, gone by
+3.8s, dismissed by a tap on the header, and moved (not closed) by a tap on another day.
+→ `sw.js v49`.
+
 ---
 
 ## Still to do / open items
