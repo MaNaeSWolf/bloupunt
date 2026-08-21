@@ -857,6 +857,34 @@ Verified: live shape reads "41 days / 24 of 32 · 75% / 9 days · not counted, 7
 logged"; every-day-paused reads "20 days / 0 of 0 / 20 days · not counted, 20 still
 logged"; and a run with no pauses is unchanged at "13 of 20 · 65%". → `sw.js v36`.
 
+### 2026-08-15 (later) — Strongest / weakest weekday per habit
+The score card's weekday pattern was useful enough to want per habit, so `habitDayStats()`
+adds it to every expanded habit view, over the shorter of that habit's own history and
+the last 13 weeks — the same window the pattern section uses.
+
+**The measure has to suit the type or it says nothing.** A yes/no rate is meaningless for
+a time habit, and an average clock reading is meaningless for a tick:
+
+| type | measure | example |
+|---|---|---|
+| toggle | how often you keep it that weekday | Monday · 100% |
+| counter | average value, so a good day and a bad day stay distinguishable | Tuesday · 4 / Friday · −3 |
+| time | average time of day | Wednesday · 20:00 / Sunday · 09:00 |
+
+Direction is respected throughout, so **strongest always means better, never merely
+larger**: an earlier-is-better wake habit reports its earliest weekday as strongest, and a
+lower-is-better counter reports its smallest.
+
+Two details worth keeping: a time habit's "didn't happen" sentinel is excluded from the
+average — averaging 1440 in would drag every weekday toward midnight and mean nothing —
+and paused days are skipped entirely, since an excused day is not evidence either way.
+
+Guards match the score card: at least 2 samples for a weekday to qualify, at least 3
+qualifying weekdays, and a real gap before any claim (15 minutes / 0.5 points / 15
+percentage points). Verified across all three types with patterns deliberately seeded, both
+direction settings, and the silent cases: 4 days of history and a perfectly flat habit both
+return nothing rather than inventing a pattern. → `sw.js v37`.
+
 ---
 
 ## Still to do / open items
