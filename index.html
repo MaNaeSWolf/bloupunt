@@ -767,6 +767,14 @@ function quintiler(values){
     return Math.max(0, Math.min(4, Math.floor(p * 5)));
   };
 }
+// Values over the last n days, sentinels included. `last21` stays for the colour
+// quintiles, which are deliberately about recent form rather than a stable average.
+function lastDaysVals(h, n){
+  const days = h.days || {}, out = [];
+  const c = midnight();
+  for (let i=0;i<n;i++){ const k = keyFor(c); if (has(days,k)) out.push(days[k]); c.setDate(c.getDate()-1); }
+  return out;
+}
 function last21(h){
   const days = h.days || {}, out = [];
   const c = midnight();
@@ -1508,7 +1516,7 @@ function timeRow(h, today){
 
   // Baseline = mean of the last 21 logged days, excluding the sentinel: comparing a
   // real time against days you never did it at all would be meaningless.
-  const past = last21(h).filter(x => x < NONE_MIN);
+  const past = lastDaysVals(h, WIN_DAYS);
   const base = past.length ? past.reduce((a,b)=>a+b,0)/past.length : null;
   const later = isDown(h) ? 'earlier' : 'later';
   const worse = isDown(h) ? 'later' : 'earlier';
@@ -1610,9 +1618,9 @@ function habitDayStats(h){
     b.n++;
     if (has(h.days, k)){
       b.hit++;
-      // A time habit's "didn't happen" is a sentinel, not a clock reading - averaging
-      // it in would drag every weekday toward midnight and mean nothing.
-      if (!isTime(h) || h.days[k] < NONE_MIN) b.vals.push(h.days[k]);
+      // A time habit's "didn't happen" counts as end of day - that IS the target, so
+      // it belongs in the average and pulls it up rather than being thrown away.
+      b.vals.push(h.days[k]);
     }
   }
 

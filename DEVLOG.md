@@ -885,6 +885,31 @@ percentage points). Verified across all three types with patterns deliberately s
 direction settings, and the silent cases: 4 days of history and a perfectly flat habit both
 return nothing rather than inventing a pattern. → `sw.js v37`.
 
+### 2026-08-15 (later) — A clean day counts as end of day, and a wider baseline
+v37 threw the "didn't happen" sentinel out of every time average, reasoning it was not a
+clock reading. That was backwards. **Midnight is the target**: for a habit you are pushing
+later, never touching it at all is the best possible outcome, so it belongs in the average
+and should pull it *up*. Excluding it meant a perfect day counted for nothing — a weekday
+you always avoided showed no data at all.
+
+Sentinels are now included wherever a time is averaged. The effect is exactly right: a
+weekday that is always clean becomes **"Sunday · None"** and ranks as the strongest, and a
+half-clean weekday lands sensibly between the two extremes rather than at one of them.
+
+**The baseline was also too narrow.** The row's "usually HH:MM" came from `last21()` — 21
+days — which swung on a single unusual day. It now uses the same 13-week window as every
+other pattern stat (`lastDaysVals(h, WIN_DAYS)`), taking the sample from 21 to ~89 days.
+`last21()` stays where it belongs: the counter colour quintiles, which are deliberately
+about *recent form* rather than a stable average.
+
+Worth recording, since it came up as a question: the per-habit weekday stat was **already**
+13 weeks or since first log, whichever is shorter. Six weeks of history yields a six-week
+window because that is all there is; it widens on its own as the record grows.
+
+Verified: Sunday-always-clean now reads strongest; "Usual" rose to 14:35 with 13 sentinels
+among 89 samples; "Best" reads None; and toggle and counter weekday stats are byte-for-byte
+unchanged. → `sw.js v38`.
+
 ---
 
 ## Still to do / open items
