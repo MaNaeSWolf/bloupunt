@@ -173,7 +173,8 @@
     background:var(--ink);color:#F7F4EF;font-size:11.5px;line-height:1;white-space:nowrap;
     padding:5px 8px;border-radius:7px;pointer-events:none;
     font-variant-numeric:tabular-nums;box-shadow:0 2px 8px rgba(61,59,55,.18)}
-  .peekD{color:#BDB6AB;margin-right:6px}
+  .peekD{color:#BDB6AB;margin-right:7px}
+  .peekD:only-child{color:#F7F4EF;margin-right:0}
   .peek::after{content:'';position:absolute;top:100%;left:var(--car,50%);transform:translateX(-50%);
     border:4px solid transparent;border-top-color:var(--ink);border-bottom:none}
   .sslot{cursor:pointer}
@@ -199,7 +200,8 @@
   .bigScore{width:46px;height:38px;flex-shrink:0;border-radius:12px;display:grid;place-items:center;
     font-family:'Fraunces',Georgia,serif;font-size:22px;font-weight:500}
   /* Score rows use the FULL card width (no 44px tick indent) so the numbers get room. */
-  .sribbon{display:flex;gap:3px;margin:14px 0 0}
+  .sribbon{display:flex;gap:3px;margin:14px 0 0;position:relative}
+  .sribbon.peeking{margin-top:40px}
   .sslot{flex:1;min-width:0;display:grid;place-items:center}
   .sbub{width:100%;max-width:26px;aspect-ratio:1;border-radius:50%;display:grid;place-items:center;
     font-size:10px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
@@ -1403,21 +1405,26 @@ const PAUSE_SEG = '#C3D5E0';
    deliberately missing from the callers: "done" printed over a solid green block says
    nothing the block did not already say, and a bubble that adds nothing is clutter. */
 function peekValue(h, k){
+  // Toggles and the score card carry their own answer already - a green block is
+  // "done", and the score is printed on the bubble you just tapped. Repeating it adds
+  // a word and no information, so these get the date alone.
+  if (!isTime(h) && !isCounter(h)) return '';
   if (!has(h.days, k))
     return (data.paused && data.paused[k]) ? 'paused' : 'not logged';
   const v = h.days[k];
-  if (isTime(h))    return v >= NONE_MIN ? 'didn\u2019t happen' : fmtTime(v);
-  if (isCounter(h)) return (v > 0 ? '+' : '') + v;
-  return 'done';
+  if (isTime(h)) return v >= NONE_MIN ? 'didn\u2019t happen' : fmtTime(v);
+  return (h.days[k] > 0 ? '+' : '') + v;
 }
 
-// Sits above slot i of n, pointing down at it. The date rides along because a bare
-// "07:42" over a 21-slot strip leaves you counting cells to work out which day it is.
+// Sits above slot i of n, pointing down at it. Every card gets the date; only the ones
+// holding a value the strip cannot show get a value beside it.
 function peekBubble(h, k, i, n){
   const d = parseKey(k);
-  const when = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+d.getDate();
+  const when = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+d.getDate()+
+    ' '+MONTHS[d.getMonth()];
+  const v = peekValue(h, k);
   return '<div class="peek" style="left:'+(((i + 0.5) / n) * 100).toFixed(2)+'%">'+
-    '<span class="peekD">'+when+'</span>'+esc(peekValue(h, k))+'</div>';
+    '<span class="peekD">'+when+'</span>'+(v ? esc(v) : '')+'</div>';
 }
 
 function chainStrip(h){
@@ -1492,9 +1499,10 @@ function chainStrip(h){
         '% - 4px);width:calc('+w.toFixed(2)+'% + 8px)"></div>';
     }
   }
-  // Counters get the number, toggles do not (see peekValue). The headroom is added
-  // only while a bubble is up, so a card nobody is reading keeps its normal spacing.
-  const pi = (counter && daySel && daySel.id===h.id)
+  // Every card on this strip gets a bubble now - the counter's number, the toggle's
+  // date on its own. The headroom is added only while one is up, so a card nobody is
+  // reading keeps its normal spacing.
+  const pi = (daySel && daySel.id===h.id)
     ? info.findIndex(x => x.k === daySel.key) : -1;
   const pk = pi >= 0 ? peekBubble(h, daySel.key, pi, N_DAYS) : '';
   return '<div class="ribbon'+(pk?' peeking':'')+'"><div class="rtrack"></div>'+ring+pk+
@@ -1946,7 +1954,8 @@ function scoreRow(h){
   const tScore = dayScore(today);
 
   // 14 days, not 21: the bubbles carry a number, so they need the width to stay legible.
-  const bubbles = windowDays(14).map(d => {
+  const S_DAYS = 14;
+  const bubbles = windowDays(S_DAYS).map(d => {
     const k = keyFor(d), t = k===today;
     // The score card cannot be edited, but its days are still selectable: tapping one
     // rings that day in every calendar, which is the whole point of a card that exists
@@ -1964,6 +1973,10 @@ function scoreRow(h){
     const bi = q(v);
     return open+'<div class="sbub'+sel+'" style="background:'+bandColourIdx(bi)+';color:'+bandInkIdx(bi)+'">'+v+'</div></div>';
   }).join('');
+
+  const sPi = (daySel && daySel.id===h.id)
+    ? windowDays(S_DAYS).map(keyFor).indexOf(daySel.key) : -1;
+  const sPk = sPi >= 0 ? peekBubble(h, daySel.key, sPi, S_DAYS) : '';
 
   let expBlock='';
   if (open){
@@ -1983,7 +1996,7 @@ function scoreRow(h){
       '</button>'+
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
-    '<div class="sribbon">'+bubbles+'</div>'+ expBlock +
+    '<div class="sribbon'+(sPk?' peeking':'')+'">'+sPk+bubbles+'</div>'+ expBlock +
   '</div>';
 }
 

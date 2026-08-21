@@ -1210,6 +1210,36 @@ no `mAt` until they are next edited — so if the two disagree about a name righ
 fix is to set it once on the phone after both have updated, and that edit will win
 everywhere.
 
+### 2026-08-21 (later) — The bubble was about the date all along
+
+v46 gave toggles no bubble, on the argument that "done" over a solid green block adds
+nothing. That reasoning was sound and the conclusion was still wrong, because it treated
+the bubble as a way to show the *value*. Its real job is the **date**: counting cells
+along a 21-slot strip to work out which Tuesday you are looking at is the actual
+friction, and that applies to every card equally. The value was only ever the part that
+varies.
+
+So every card gets a bubble now. Toggles and the score card show the date alone — the
+green block already says "done", and the score is printed on the very bubble you tapped,
+so repeating either costs a word and returns no information. Counters and time habits
+keep their value beside the date, as before. The date also gained its month
+(`Thu 13 Aug`), since the strip reaches back three weeks and a bare day number is
+ambiguous across a month boundary.
+
+Small thing worth writing down: a date-only bubble reads at full strength rather than in
+the muted grey. That grey exists so the value in front of it leads; with nothing beside
+it, the date *is* the content, and dimming it would be styling the label of a thing that
+is no longer there. One `:only-child` rule, but it is the difference between a bubble
+that looks deliberate and one that looks disabled.
+
+The score ribbon needed its own index — it shows 14 days where the habit strips show 21,
+so it cannot borrow `N_DAYS`. Verified that the bubble names the day actually tapped at
+slots 0, 9 and 13, stays inside the card at both ends, and that the calendar below rings
+the same day; the post-layout clamp from v46 handles the edges unchanged. → `sw.js v48`.
+
+Also confirmed today: the v47 sync fix works. Both devices took the update, one rename
+on the phone, and the two now agree.
+
 ---
 
 ## Still to do / open items
