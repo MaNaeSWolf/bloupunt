@@ -1103,6 +1103,54 @@ Verified on the reported shape (25 junk days of 0 and 3, then 19 real logs at
 sub-minute values left. The chain drop is the point — those days had been counted as
 logged all along. → `sw.js v45`.
 
+### 2026-08-21 — Reading a day without touching it
+
+v43 moved editing off the week strip and onto the month calendar, which fixed the
+accidental-edit problem but cost something: the strip is the thing you actually look at
+every day, and it had become purely decorative. A gold segment meant "a middling day"
+and nothing more precise. The value was in the app, just not reachable from the place
+you were looking.
+
+So the strip gets its tap back — but as a **read**, not a write. Tapping a day pops a
+small dark bubble above it carrying the date and the value: `Sat 15  07:48` on a time
+habit, `Wed 12  +4` on a counter. Tap it again and it closes. Nothing about the log can
+change from here, which is the whole reason it is safe to make the strip tappable again.
+Reading and writing being separate actions in separate places is what stops one from
+being mistaken for the other.
+
+**Toggles get no bubble.** "done" printed over a solid green block says nothing the
+block did not already say, and a popup that adds nothing is just something else to
+dismiss. They still select — they just do it silently.
+
+**One day, every calendar.** The selection is global, so the chosen day is ringed in
+black in the month grid of whichever card you open next — including the score card,
+which cannot be edited at all and now reads as what it is: a summary you can line up
+against the habits that produced it. Its ribbon is selectable too, with no bubble, since
+its bubbles already have the number printed on them. One tap, then flick through the
+cards, and you can see what a day looked like across everything at once.
+
+Three details worth recording, because each one was wrong first:
+
+- **The ring is an outline, not an inset.** On a 12px calendar cell a 2px inset ring
+  eats most of the colour it is meant to be pointing at. The same mistake was already
+  sitting in the strip's selection style, where it made a neutral-banded day look like a
+  hole punched in the chain — fixed in the same pass. Outline also takes no space, so
+  picking a day does not reflow anything.
+- **Every slot can show the mark now.** Only days inside a run could before, so
+  selecting a missed, paused, or not-yet-logged day moved the calendars and raised a
+  bubble while the slot you had just tapped sat there looking untouched.
+- **The bubble is nudged back inside after layout.** Centred on its own day, "didn't
+  happen" on day 21 hangs about 20px off the right edge of a 375px phone. How far it
+  hangs depends on the text, which is only knowable once it is rendered, so the
+  correction happens after layout rather than being guessed at. The tail stays over the
+  day, so a shifted bubble still points at the right slot.
+
+Verified at 375px on all four card types: every bubble sits inside its card and on
+screen at slots 0, 10 and 20, no sideways page scroll, the tail tracks the day. Tapping
+all 21 slots in a row leaves the stored values byte-identical — the strip genuinely
+cannot write. Calendar editing, day-stepping and the chip all still work, and the ring
+now walks with them. → `sw.js v46`.
+
 ---
 
 ## Still to do / open items

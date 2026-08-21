@@ -156,14 +156,31 @@
      logged, which is precisely when people lose track of their own breaks. */
   .bar.paused,.cell.paused,.scell.paused{box-shadow:inset 0 0 0 2px #A2BECE}
   .cell.sel{box-shadow:inset 0 0 0 2px var(--ink);transform:scale(1.4)}
+  /* Drawn OUTSIDE the cell, not inset: on a 12px square an inset ring eats most of
+     the colour it is meant to point at. Outline also takes no space, so nothing
+     reflows when a day is picked - the calendars just gain a mark. */
+  .cell.peek,.scell.peek{outline:2px solid var(--ink);outline-offset:1px;
+    position:relative;z-index:1}
   .ribbon{position:relative;margin:14px 0 0 44px;height:22px}
+  /* Headroom for the bubble, present only while one is up. */
+  .ribbon.peeking{margin-top:40px}
+  .tgraph.peeking{margin-top:38px;position:relative}
+  .peek{position:absolute;bottom:calc(100% + 7px);transform:translateX(-50%);z-index:4;
+    background:var(--ink);color:#F7F4EF;font-size:11.5px;line-height:1;white-space:nowrap;
+    padding:5px 8px;border-radius:7px;pointer-events:none;
+    font-variant-numeric:tabular-nums;box-shadow:0 2px 8px rgba(61,59,55,.18)}
+  .peekD{color:#BDB6AB;margin-right:6px}
+  .peek::after{content:'';position:absolute;top:100%;left:var(--car,50%);transform:translateX(-50%);
+    border:4px solid transparent;border-top-color:var(--ink);border-bottom:none}
+  .sslot{cursor:pointer}
+  .sbub.selBub,.tdot.selBub{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--ink)}
   /* 2px clear of the segments on every side, so it never kisses a rounded cap. */
   .chainRing{position:absolute;top:-0.5px;height:23px;border:2px solid var(--sageDeep);
     border-radius:12px;opacity:.45;pointer-events:none;z-index:2}
   .chainRing.openL{border-left:none;border-radius:0 12px 12px 0}
   .rtrack{position:absolute;left:2px;right:2px;top:50%;height:4px;transform:translateY(-50%);background:var(--hair);border-radius:2px}
   .rrow{position:relative;display:flex;height:100%;z-index:1}
-  .rslot{flex:1;display:grid;place-items:center}
+  .rslot{flex:1;display:grid;place-items:center;cursor:pointer}
   .seg{width:100%;height:15px;transition:transform 150ms ease}
   .seg.gap{background:transparent!important;height:4px}
   .seg.s1{border-radius:8px 0 0 8px}
@@ -171,7 +188,8 @@
   .seg.s3{border-radius:0 8px 8px 0}
   .seg.s4{border-radius:8px}
   .seg.div{box-shadow:inset -1.5px 0 0 rgba(247,244,239,.55)}
-  .seg.selSeg{box-shadow:inset 0 0 0 2px var(--ink)}
+  .seg.selSeg{outline:2px solid var(--ink);position:relative;z-index:2}
+  .tdot.selDot{border-color:var(--ink);border-width:2.5px}
   .rslot:hover .seg{transform:scaleY(1.2)}
   .tdot{width:9px;height:9px;border-radius:50%;background:transparent;border:1.5px solid var(--soft)}
   .bigScore{width:46px;height:38px;flex-shrink:0;border-radius:12px;display:grid;place-items:center;
@@ -414,6 +432,7 @@ let pauseOpen = false;      // pause-days chooser open
 let dayEdit   = null;       // { id, key } — the strip day-edit chip target
 let clearHist = null;       // habit id whose "clear all history" is awaiting confirm
 let chipCut   = null;       // day key whose "clear to here" is awaiting confirm
+let daySel    = null;       // { id, key } — a day picked in a week view, read-only
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -1039,7 +1058,7 @@ window.toggle = (id, k) => {
 };
 
 window.setScreen = s => {
-  grab(); screen = s; editing = null; confirm = null; dayEdit = null; clearHist = null; render();
+  grab(); screen = s; editing = null; confirm = null; dayEdit = null; daySel = null; clearHist = null; render();
 };
 
 window.toggleExpand = id => { expanded = (expanded === id) ? null : id; dayEdit = null; chipCut = null; render(); };
@@ -1116,8 +1135,22 @@ window.resumeNow = () => {
 };
 
 // Day-edit chip (opened from a strip cell). openDay toggles it for that cell.
-window.openDay  = (id, k) => { dayEdit = (dayEdit && dayEdit.id===id && dayEdit.key===k) ? null : { id, key:k }; render(); };
-window.closeDay = () => { dayEdit = null; chipCut = null; render(); };
+window.openDay  = (id, k) => {
+  dayEdit = (dayEdit && dayEdit.id===id && dayEdit.key===k) ? null : { id, key:k };
+  daySel  = dayEdit ? { id, key:k } : null;     // keep the calendars pointing at one day
+  render();
+};
+window.closeDay = () => { dayEdit = null; daySel = null; chipCut = null; render(); };
+
+/* Picking a day in a week view is READ-ONLY. It answers "what was that day?" — the
+   value appears above the day you tapped, and the SAME day is ringed in every calendar
+   on the screen, the score card's included, so one tap lines all the cards up against
+   each other. Editing stays where v43 put it: the month grid only. Keeping the two
+   apart is what lets the strip be tapped freely with no risk of changing a log. */
+window.peekDay = (id, k) => {
+  daySel = (daySel && daySel.id === id && daySel.key === k) ? null : { id, key:k };
+  render();
+};
 
 /* Clear this day and everything before it. A habit converted from another type keeps
    the old type's numbers, and they are not harmless: a counter's net-zero day is a
@@ -1142,6 +1175,7 @@ window.stepDay = (id, delta) => {
   d.setDate(d.getDate() + delta);
   if (d > midnight()) return;
   dayEdit = { id, key: keyFor(d) };
+  daySel  = { id, key: keyFor(d) };            // the ring walks with the chip
   render();
 };
 window.setDone  = (id, k) => {
@@ -1327,6 +1361,27 @@ const CHEV_SVG = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none">'+
 // (a lighter segment keeps the bar going) so an intentional break isn't a failure.
 const N_DAYS = 21;
 const PAUSE_SEG = '#C3D5E0';
+/* One day of one habit, in the fewest characters that still say something. Toggles are
+   deliberately missing from the callers: "done" printed over a solid green block says
+   nothing the block did not already say, and a bubble that adds nothing is clutter. */
+function peekValue(h, k){
+  if (!has(h.days, k))
+    return (data.paused && data.paused[k]) ? 'paused' : 'not logged';
+  const v = h.days[k];
+  if (isTime(h))    return v >= NONE_MIN ? 'didn\u2019t happen' : fmtTime(v);
+  if (isCounter(h)) return (v > 0 ? '+' : '') + v;
+  return 'done';
+}
+
+// Sits above slot i of n, pointing down at it. The date rides along because a bare
+// "07:42" over a 21-slot strip leaves you counting cells to work out which day it is.
+function peekBubble(h, k, i, n){
+  const d = parseKey(k);
+  const when = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+d.getDate();
+  return '<div class="peek" style="left:'+(((i + 0.5) / n) * 100).toFixed(2)+'%">'+
+    '<span class="peekD">'+when+'</span>'+esc(peekValue(h, k))+'</div>';
+}
+
 function chainStrip(h){
   const today = todayKey();
   const counter = isCounter(h), col = counter ? counterScale(h) : null;
@@ -1337,7 +1392,7 @@ function chainStrip(h){
       logged: has(h.days, k),
       paused: !!(data.paused && data.paused[k] && !has(h.days,k)),
       today:  k===today,
-      sel:    !!(dayEdit && dayEdit.id===h.id && dayEdit.key===k),
+      sel:    !!(daySel && daySel.id===h.id && daySel.key===k),
       bg:     counter ? col(d) : shade(h,d)
     };
   });
@@ -1354,13 +1409,14 @@ function chainStrip(h){
 
   const cells = info.map((x,i) => {
     const lab = x.k+(counter?(', '+(h.days[x.k]||0)):(x.logged?', done':', not done'));
+    const act = 'peekDay('+h.id+',\''+x.k+'\')';
     let inner;
     if (x.today && !x.logged){
-      inner = '<div class="tdot"></div>';                       // today, not yet logged
+      inner = '<div class="tdot'+(x.sel?' selDot':'')+'"></div>';         // today, not yet logged
     } else if (!inRun[i]){
       inner = x.paused
-        ? '<div class="seg s4" style="background:'+PAUSED_FILL+';height:9px"></div>'
-        : '<div class="seg gap"></div>';                  // missed / untouched: just the track
+        ? '<div class="seg s4'+(x.sel?' selSeg':'')+'" style="background:'+PAUSED_FILL+';height:9px"></div>'
+        : '<div class="seg gap'+(x.sel?' selSeg':'')+'"></div>';   // missed / untouched: just the track
     } else {
       const first = !inRun[i-1], last = !inRun[i+1];
       const shape = first&&last ? 's4' : first ? 's1' : last ? 's3' : 's2';
@@ -1368,7 +1424,8 @@ function chainStrip(h){
       const fill = x.logged ? x.bg : PAUSE_SEG;
       inner = '<div class="seg '+shape+div+(x.sel?' selSeg':'')+'" style="background:'+fill+'"></div>';
     }
-    return '<div class="rslot" aria-label="'+lab+'">'+inner+'</div>';
+    return '<div class="rslot" role="button" tabindex="0" aria-label="'+lab+'" onclick="'+act+'" '+
+      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}">'+inner+'</div>';
   }).join('');
 
   // Ring the run that is currently earning EXTRA points, so a chain worth more than
@@ -1397,7 +1454,12 @@ function chainStrip(h){
         '% - 4px);width:calc('+w.toFixed(2)+'% + 8px)"></div>';
     }
   }
-  return '<div class="ribbon"><div class="rtrack"></div>'+ring+
+  // Counters get the number, toggles do not (see peekValue). The headroom is added
+  // only while a bubble is up, so a card nobody is reading keeps its normal spacing.
+  const pi = (counter && daySel && daySel.id===h.id)
+    ? info.findIndex(x => x.k === daySel.key) : -1;
+  const pk = pi >= 0 ? peekBubble(h, daySel.key, pi, N_DAYS) : '';
+  return '<div class="ribbon'+(pk?' peeking':'')+'"><div class="rtrack"></div>'+ring+pk+
     '<div class="rrow">'+cells+'</div></div>';
 }
 
@@ -1445,7 +1507,10 @@ function fullGrid(h){
   // only through the day chip on the 21-day strip, so nothing here can be mis-tapped.
   const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
     const future = d > now, k = keyFor(d);
-    const sel = (dayEdit && dayEdit.id===h.id && dayEdit.key===k) ? ' sel' : '';
+    // Two different marks. ".sel" is the day THIS card is editing; ".peek" is the day
+    // selected anywhere on screen, drawn on every card so they can be read across.
+    const sel = (dayEdit && dayEdit.id===h.id && dayEdit.key===k) ? ' sel'
+      : (daySel && daySel.key===k) ? ' peek' : '';
     const cls = 'cell'+(future?' future':'')+(k===today?' today':'')+((data.paused && data.paused[k])?' paused':'')+(has(h.days,k)?' marked':'')+sel;
     const bg  = graded ? col(d) : shade(h,d);
     const act = 'openDay('+h.id+',\''+k+'\')';
@@ -1542,7 +1607,7 @@ function timeGraph(h){
     const k = keyFor(d);
     return { k, v: h.days[k], logged: has(h.days,k),
              paused: !!(data.paused && data.paused[k] && !has(h.days,k)),
-             today: k===today, sel: !!(dayEdit && dayEdit.id===h.id && dayEdit.key===k) };
+             today: k===today, sel: !!(daySel && daySel.id===h.id && daySel.key===k) };
   });
 
   const vals = info.filter(x=>x.logged).map(x=>x.v);
@@ -1571,7 +1636,13 @@ function timeGraph(h){
 
   const dots = info.map((x,i) => {
     const cx = xOf(i).toFixed(2)+'%';
-    const hit = '';                    // editing lives on the calendar now
+    // A dot is a 4px target, so every day gets a full-height invisible rect to tap.
+    // Read-only: it reveals the time, it cannot change it.
+    const act = 'peekDay('+h.id+',\''+x.k+'\')';
+    const hit = '<rect x="'+((i/N_DAYS)*100).toFixed(2)+'%" y="0" width="'+(100/N_DAYS).toFixed(2)+
+      '%" height="'+GH+'" fill="transparent" style="cursor:pointer" role="button" tabindex="0" '+
+      'aria-label="'+x.k+(x.logged?', '+(x.v>=NONE_MIN?'didn\u2019t happen':fmtTime(x.v)):', not logged')+'" '+
+      'onclick="'+act+'"></rect>';
     if (!x.logged){
       const y = GH - GPAD - (GH - GPAD*2)/2;
       const c = x.today ? '<circle cx="'+cx+'" cy="'+y+'" r="3.2" fill="none" stroke="var(--soft)" stroke-width="1.4"/>'
@@ -1585,7 +1656,10 @@ function timeGraph(h){
 
   // No viewBox: user units are CSS pixels, so the circles stay round. x is given as a
   // percentage (responsive), y in px.
-  return '<div class="tgraph"><svg width="100%" height="'+GH+'">'+ segs + dots +'</svg></div>';
+  const pi = (daySel && daySel.id===h.id) ? info.findIndex(x => x.k === daySel.key) : -1;
+  const pk = pi >= 0 ? peekBubble(h, daySel.key, pi, N_DAYS) : '';
+  return '<div class="tgraph'+(pk?' peeking':'')+'">'+pk+
+    '<svg width="100%" height="'+GH+'">'+ segs + dots +'</svg></div>';
 }
 
 function timeRow(h, today){
@@ -1836,14 +1910,21 @@ function scoreRow(h){
   // 14 days, not 21: the bubbles carry a number, so they need the width to stay legible.
   const bubbles = windowDays(14).map(d => {
     const k = keyFor(d), t = k===today;
+    // The score card cannot be edited, but its days are still selectable: tapping one
+    // rings that day in every calendar, which is the whole point of a card that exists
+    // to summarise the others. No bubble - the number is already printed on the bubble.
+    const sel = (daySel && daySel.id===h.id && daySel.key===k) ? ' selBub' : '';
+    const act = 'peekDay('+h.id+',\''+k+'\')';
+    const open = '<div class="sslot" role="button" tabindex="0" aria-label="'+k+'" onclick="'+act+'" '+
+      'onkeydown="if(event.key===\'Enter\'){event.preventDefault();'+act+'}">';
     if (!dayHasLog(k)){
       const pz = (data.paused || {})[k];
-      return '<div class="sslot">'+(t ? '<div class="tdot"></div>'
-        : '<div class="sbub off"'+(pz?' style="background:'+PAUSED_FILL+'"':'')+'></div>')+'</div>';
+      return open+(t ? '<div class="tdot'+sel+'"></div>'
+        : '<div class="sbub off'+sel+'"'+(pz?' style="background:'+PAUSED_FILL+'"':'')+'></div>')+'</div>';
     }
     const v = dayScore(k);
     const bi = q(v);
-    return '<div class="sslot"><div class="sbub" style="background:'+bandColourIdx(bi)+';color:'+bandInkIdx(bi)+'">'+v+'</div></div>';
+    return open+'<div class="sbub'+sel+'" style="background:'+bandColourIdx(bi)+';color:'+bandInkIdx(bi)+'">'+v+'</div></div>';
   }).join('');
 
   let expBlock='';
@@ -2055,11 +2136,12 @@ function scoreGrid(q){
     const future = d > now, k = keyFor(d);
     if (future) return '<div class="scell future"></div>';
     const pz = (data.paused || {})[k] ? ' paused' : '';
+    const pk = (daySel && daySel.key===k) ? ' peek' : '';
     if (!dayHasLog(k))
-      return '<div class="scell'+pz+'"'+(pz?' style="background:'+PAUSED_FILL+'"':'')+'></div>';
+      return '<div class="scell'+pz+pk+'"'+(pz?' style="background:'+PAUSED_FILL+'"':'')+'></div>';
     const v = dayScore(k);
     const bi = q(v);
-    return '<div class="scell'+pz+'" style="background:'+bandColourIdx(bi)+';color:'+bandInkIdx(bi)+'">'+v+'</div>';
+    return '<div class="scell'+pz+pk+'" style="background:'+bandColourIdx(bi)+';color:'+bandInkIdx(bi)+'">'+v+'</div>';
   }).join('') + '</div>').join('');
   return '<div class="sgrid"><div class="months"><div class="mSpace"></div>'+months+'</div>'+
     '<div class="weeks">'+dowCol()+cols+'</div></div>';
@@ -2430,6 +2512,27 @@ function render(){
 
   const f = document.getElementById('fName');
   if (f && !f.value) f.focus();
+  placePeek();
+}
+
+/* A bubble centred on its own day runs off the card at the first and last few slots -
+   "didn't happen" on day 21 of a 375px phone hangs a good 20px past the edge. How far
+   it hangs depends on the text, which is only knowable once it is on the page, so the
+   nudge happens after layout rather than being guessed at render time. The tail stays
+   on the day it belongs to, so a shifted bubble still points at the right slot. */
+function placePeek(){
+  const pk = document.querySelector('.peek');
+  if (!pk) return;
+  const box = pk.parentElement.getBoundingClientRect();
+  const b = pk.getBoundingClientRect(), pad = 2;
+  let dx = 0;
+  if (b.left  < box.left  + pad) dx = (box.left  + pad) - b.left;
+  else if (b.right > box.right - pad) dx = (box.right - pad) - b.right;
+  if (!dx) return;
+  pk.style.marginLeft = dx.toFixed(1)+'px';
+  // Keep the tail over the slot, but never let it slide off its own bubble.
+  const car = Math.max(9, Math.min(b.width - 9, b.width/2 - dx));
+  pk.style.setProperty('--car', car.toFixed(1)+'px');
 }
 
 /* ═══════════════ BOOT ═══════════════ */
