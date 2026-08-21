@@ -1151,6 +1151,65 @@ all 21 slots in a row leaves the stored values byte-identical — the strip genu
 cannot write. Calendar editing, day-stepping and the chip all still work, and the ring
 now walks with them. → `sw.js v46`.
 
+### 2026-08-21 (later) — A name collision in the CSS, and a real one in the sync
+
+Two bugs, unrelated except that both come from two different things being given one
+name.
+
+**The calendar tiles were flying out of the grid.** Selecting a day left a hole in one
+week column and put a stray tile up over the week strip. `.peek` had been given to the
+floating bubble *and* to the calendar ring, so every ringed cell inherited the bubble's
+own layout — `bottom:calc(100% + 7px)`, `transform`, `padding`. Relative positioning
+honours `bottom`, so the cell shifted up by the height of its whole column while leaving
+its space behind: the hole and the floating tile were the same cell.
+
+This is the fourth class-name collision in this file (`.seg`, `.empty`, `.cell.marked`,
+now `.peek`), and they all present the same way — an element that looks like it moved
+for no reason. The ring is now `.selDay`, with a NAMING note above it saying why the two
+must stay apart. The score card never had a bubble and still does not; what looked like
+one was this bug.
+
+**The sync could not tell which device was right.** A merge unions the logged days,
+which is correct — a day recorded anywhere is real. Metadata cannot work that way: a
+name has exactly one value, so the merge has to *choose*. It chose local, every time,
+unconditionally. So a machine that is shut 99% of the time kept its months-old names
+through every merge and pushed them back out on its next edit, overwriting the phone.
+
+Worse, `dataSig` — which decides whether the merged result is worth sending — only
+fingerprinted day keys. A name that differed between devices produced *identical*
+signatures, so the device holding the correct name concluded it had nothing to send,
+adopted the remote clock and sat on the correction, while the stale one carried on
+republishing the old name. Silent, and self-sustaining.
+
+Fixed in three parts:
+
+- Every habit carries `mAt`, stamped whenever its fields are edited. The newer stamp
+  wins the metadata; days still union as before. Habits predating this carry no stamp
+  and count as oldest, so an edited habit always beats an untouched one — the right
+  answer in every case that can actually arise.
+- `dataSig` now covers name, type, direction, cue, stack, floor and `mAt`, so winning a
+  metadata conflict actually results in the correction being pushed.
+- Deletes leave a tombstone in `data.gone`. Without one the union simply handed a
+  deleted habit back, because it had no way to tell "deleted here" from "not yet seen
+  here" — the other half of why the two devices disagreed about what cards existed. A
+  habit edited *after* a delete survives it: editing it elsewhere is a clear statement
+  that it is still wanted, and it is the newer intent.
+
+Verified against the reported scenario and its mirror: the stale device adopts the newer
+name and pushes nothing; the fresh device keeps its name and does push it out; two
+pre-`mAt` copies behave exactly as before, with no churn; an edit beats an untouched
+copy; a delete sticks against a stale device holding logged days; a later edit outranks
+a delete; and re-merging a settled state with itself is a no-op, so there is no push
+ping-pong. On the visual side: ring `position:relative`, `bottom:0`, no transform, no
+padding, column heights unchanged, grid does not move, and zero bubbles on toggle and
+score cards. → `sw.js v47`.
+
+**Note for the next sync change.** Both devices need v47 before this fully takes hold.
+Until the PC has loaded it, it is still running the old merge, and existing habits carry
+no `mAt` until they are next edited — so if the two disagree about a name right now, the
+fix is to set it once on the phone after both have updated, and that edit will win
+everywhere.
+
 ---
 
 ## Still to do / open items

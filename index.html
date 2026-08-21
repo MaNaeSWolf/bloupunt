@@ -159,7 +159,11 @@
   /* Drawn OUTSIDE the cell, not inset: on a 12px square an inset ring eats most of
      the colour it is meant to point at. Outline also takes no space, so nothing
      reflows when a day is picked - the calendars just gain a mark. */
-  .cell.peek,.scell.peek{outline:2px solid var(--ink);outline-offset:1px;
+  /* NAMING: this is the calendar ring. The floating bubble is ".peek" and the two
+     must never share a name - when they did, every ringed cell inherited the
+     bubble's bottom/transform/padding and lifted itself out of the grid, leaving a
+     hole in the column and a stray tile hovering over the week strip. */
+  .cell.selDay,.scell.selDay{outline:2px solid var(--ink);outline-offset:1px;
     position:relative;z-index:1}
   .ribbon{position:relative;margin:14px 0 0 44px;height:22px}
   /* Headroom for the bubble, present only while one is up. */
@@ -397,12 +401,13 @@ function windowDays(n){
 
 /* ═══════════════ STATE ═══════════════ */
 
-let data = { habits: [], seen: {}, paused: {}, updatedAt: 0 };
+let data = { habits: [], seen: {}, paused: {}, gone: {}, updatedAt: 0 };
 try {
   const raw = localStorage.getItem('bloupunt-data');
   if (raw) {
     const d = JSON.parse(raw);
-    data = { habits: d.habits||[], seen: d.seen||{}, paused: d.paused||{}, updatedAt: d.updatedAt||0 };
+    data = { habits: d.habits||[], seen: d.seen||{}, paused: d.paused||{},
+             gone: d.gone||{}, updatedAt: d.updatedAt||0 };
   }
 } catch(e){}
 
@@ -464,7 +469,8 @@ window.undo = () => {
   // appearing at the top would shove every row down and then snap back.
   const snapshot = list => { const m={}; for (const h of list||[]) m[h.id] = JSON.stringify(h); return m; };
   const before = snapshot(data.habits);
-  data = { habits: obj.habits||[], seen: obj.seen||{}, paused: obj.paused||{}, updatedAt: obj.updatedAt||0 };
+  data = { habits: obj.habits||[], seen: obj.seen||{}, paused: obj.paused||{},
+           gone: obj.gone||{}, updatedAt: obj.updatedAt||0 };
   const after = snapshot(data.habits);
   flashIds = {};
   for (const id of new Set(Object.keys(before).concat(Object.keys(after))))
@@ -524,17 +530,39 @@ async function decryptData(pkg, pass){
    union of seen{}. Habit metadata (name/cue/floor) keeps the LOCAL copy.
    Caveat: a habit deleted on one device can reappear from the other device's
    copy - just delete it again. Days are never lost, which is the whole point. */
+/* Days union - a logged day is never dropped, whichever side it came from. Metadata
+   cannot work that way: a name has one value, so the merge has to CHOOSE. It used to
+   choose local every single time, which is why a machine that is shut 99% of the time
+   could still overwrite the phone - it kept its months-old names through every merge
+   and pushed them back out on its next edit. Now each side carries `mAt`, stamped
+   whenever a habit's fields are edited, and the newer stamp wins. Habits predating
+   this carry no stamp and count as oldest, so an edited habit always beats an
+   untouched one - which is the right answer in every case that can actually arise. */
 function unionInto(incoming){
   const localById = {}, remoteById = {}, order = [], on = {};
   for (const h of data.habits) localById[h.id] = h;
   for (const h of (incoming.habits||[])) remoteById[h.id] = h;
   for (const h of data.habits){ order.push(h.id); on[h.id] = 1; }
   for (const h of (incoming.habits||[])) if (!on[h.id]){ order.push(h.id); on[h.id] = 1; }
+
+  // Tombstones union too, keeping the later of two deletions.
+  const gone = { ...(data.gone||{}) };
+  for (const [id, ts] of Object.entries(incoming.gone||{}))
+    gone[id] = Math.max(gone[id]||0, ts||0);
+
   data.habits = order.map(id => {
     const l = localById[id], r = remoteById[id];
-    if (l && r) return { ...l, days: { ...(l.days||{}), ...(r.days||{}) } };
-    return l || r;
+    if (!(l && r)) return l || r;
+    const days = { ...(l.days||{}), ...(r.days||{}) };   // union, remote wins a clash
+    const meta = (r.mAt||0) > (l.mAt||0) ? r : l;        // newer edit wins the fields
+    return { ...meta, days };
+  }).filter(h => {
+    // A delete sticks unless the habit was edited AFTER it - editing it somewhere else
+    // is a clear statement that it is still wanted, and that is the newer intent.
+    const ts = gone[h.id];
+    return !ts || (h.mAt||0) > ts;
   });
+  data.gone = gone;
   data.seen = { ...(data.seen||{}), ...(incoming.seen||{}) };
   data.paused = { ...(data.paused||{}), ...(incoming.paused||{}) };
 }
@@ -543,9 +571,15 @@ function unionInto(incoming){
 // merge changed local (repaint) and whether remote lacks data we should push.
 function dataSig(o){
   return JSON.stringify({
-    h: (o.habits||[]).map(x => [x.id, Object.keys(x.days||{}).sort()]),
+    // Metadata belongs in here. While it did not, a name that differed between devices
+    // produced identical signatures, so the winning side decided it had nothing to send
+    // and quietly sat on the correction while the loser kept republishing the old name.
+    h: (o.habits||[]).map(x => [x.id, x.name||'', x.type||'', x.dir||'', x.cue||'',
+                                x.stack||'', x.minimum||'', x.mAt||0,
+                                Object.keys(x.days||{}).sort()]),
     s: Object.keys(o.seen||{}).sort(),
-    p: Object.keys(o.paused||{}).sort()
+    p: Object.keys(o.paused||{}).sort(),
+    g: Object.keys(o.gone||{}).sort()
   });
 }
 
@@ -1219,10 +1253,10 @@ window.commit = () => {
   if (form.type === 'score'){                 // the computed card: name is fixed, single instance
     if (editing === 'new'){
       if (hasScore()) { editing = null; render(); return; }
-      data.habits.push({ id: Date.now(), name:'Score', type:'score', days:{} });
+      data.habits.push({ id: Date.now(), name:'Score', type:'score', days:{}, mAt: Date.now() });
     } else {
       const h = data.habits.find(x => x.id === editing);
-      if (h){ h.type = 'score'; h.name = 'Score'; }
+      if (h){ h.type = 'score'; h.name = 'Score'; h.mAt = Date.now(); }
     }
     save(); editing = null; render(); return;
   }
@@ -1237,13 +1271,13 @@ window.commit = () => {
     dir:     form.dir || 'up'
   };
   if (editing === 'new'){
-    data.habits.push({ id: Date.now(), days:{}, ...payload });
+    data.habits.push({ id: Date.now(), days:{}, ...payload, mAt: Date.now() });
   } else {
     const h = data.habits.find(x => x.id === editing);
     if (h){
       // A counter's -1 is not a time of day. Crossing families drops the old values.
       if (famOf(h.type||'toggle') !== famOf(payload.type)) h.days = {};
-      Object.assign(h, payload);
+      Object.assign(h, payload, { mAt: Date.now() });
     }
   }
   save(); editing = null; render();
@@ -1264,6 +1298,10 @@ window.askRemove = id => { confirm = id; render(); };
 window.cancelRemove = () => { confirm = null; render(); };
 window.doRemove = id => {
   data.habits = data.habits.filter(h => h.id !== id);
+  // Leave a tombstone. The merge is a union, so without one the next device to sync
+  // hands the habit straight back - it has no way to tell "deleted here" from
+  // "not yet seen here".
+  (data.gone = data.gone || {})[id] = Date.now();
   save(); confirm = null; expanded = null; render();
 };
 
@@ -1507,10 +1545,10 @@ function fullGrid(h){
   // only through the day chip on the 21-day strip, so nothing here can be mis-tapped.
   const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
     const future = d > now, k = keyFor(d);
-    // Two different marks. ".sel" is the day THIS card is editing; ".peek" is the day
-    // selected anywhere on screen, drawn on every card so they can be read across.
+    // Two different marks. ".sel" is the day THIS card is editing; ".selDay" is the
+    // day selected anywhere on screen, drawn on every card so they read across.
     const sel = (dayEdit && dayEdit.id===h.id && dayEdit.key===k) ? ' sel'
-      : (daySel && daySel.key===k) ? ' peek' : '';
+      : (daySel && daySel.key===k) ? ' selDay' : '';
     const cls = 'cell'+(future?' future':'')+(k===today?' today':'')+((data.paused && data.paused[k])?' paused':'')+(has(h.days,k)?' marked':'')+sel;
     const bg  = graded ? col(d) : shade(h,d);
     const act = 'openDay('+h.id+',\''+k+'\')';
@@ -2136,7 +2174,7 @@ function scoreGrid(q){
     const future = d > now, k = keyFor(d);
     if (future) return '<div class="scell future"></div>';
     const pz = (data.paused || {})[k] ? ' paused' : '';
-    const pk = (daySel && daySel.key===k) ? ' peek' : '';
+    const pk = (daySel && daySel.key===k) ? ' selDay' : '';
     if (!dayHasLog(k))
       return '<div class="scell'+pz+pk+'"'+(pz?' style="background:'+PAUSED_FILL+'"':'')+'></div>';
     const v = dayScore(k);
@@ -2521,7 +2559,7 @@ function render(){
    nudge happens after layout rather than being guessed at render time. The tail stays
    on the day it belongs to, so a shifted bubble still points at the right slot. */
 function placePeek(){
-  const pk = document.querySelector('.peek');
+  const pk = document.querySelector('.peek');    // the bubble only - see NAMING above
   if (!pk) return;
   const box = pk.parentElement.getBoundingClientRect();
   const b = pk.getBoundingClientRect(), pad = 2;
