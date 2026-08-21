@@ -151,9 +151,10 @@
      logged, which is precisely when people lose track of their own breaks. */
   .bar.paused,.cell.paused,.scell.paused{box-shadow:inset 0 0 0 2px #A2BECE}
   .ribbon{position:relative;margin:14px 0 0 44px;height:22px}
-  .chainRing{position:absolute;top:0;height:100%;border:1.5px solid var(--sageDeep);
-    border-radius:11px;opacity:.45;pointer-events:none;z-index:2}
-  .chainRing.openL{border-left:none;border-radius:0 11px 11px 0}
+  /* 2px clear of the segments on every side, so it never kisses a rounded cap. */
+  .chainRing{position:absolute;top:1.5px;height:19px;border:2px solid var(--sageDeep);
+    border-radius:10px;opacity:.45;pointer-events:none;z-index:2}
+  .chainRing.openL{border-left:none;border-radius:0 10px 10px 0}
   .rtrack{position:absolute;left:2px;right:2px;top:50%;height:4px;transform:translateY(-50%);background:var(--hair);border-radius:2px}
   .rrow{position:relative;display:flex;height:100%;z-index:1}
   .rslot{flex:1;display:grid;place-items:center;cursor:pointer}
@@ -820,6 +821,7 @@ function counterScale(h){
    takes twice as long as the last, so the ladder climbs slowly and a high tier means
    something. A single missed day costs nothing; every SECOND consecutive miss drops
    one tier, knocking the chain back to the start of the tier below. */
+const GRACE_EVERY = 14;        // one free skip per fortnight, at every tier
 const TIER_DAYS = (() => {
   const t = [0, 14, 30];                        // start, 14 days, 1 month
   for (let d = 60; d <= 60000; d *= 2) t.push(d);   // 2m, 4m, 8m, 16m, 32m...
@@ -835,7 +837,7 @@ function chainRun(h){
   if (_chainCache[h.id]) return _chainCache[h.id];
   const days = h.days || {}, paused = data.paused || {};
   const points = {};
-  let chain = 0, graceUsed = false, runDrops = 0;
+  let chain = 0, runDrops = 0, di = 0, graceAt = null;
   const start = habitStart(h), end = midnight();
   if (start){
     for (const d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
@@ -844,20 +846,26 @@ function chainRun(h){
       else if (paused[k]){ /* bridges: neither builds nor breaks */ }
       else if (k === keyFor(end)){ /* today is grace until tomorrow */ }
       else {
-        // ONE free day per chain, not per gap. Spend it and every missed day after
-        // costs a tier, down to the floor - logging is always worth 1, so the ladder
-        // never goes negative. Falling to the floor is a fresh start: grace returns.
-        if (!graceUsed) graceUsed = true;
+        // ONE free day per GRACE_EVERY days, at every tier. A single free skip for the
+        // whole life of a chain was too harsh at the top: eight months of work with one
+        // sick day of slack. Regenerating it on a timer keeps the cost of a genuine
+        // lapse while allowing for ordinary life. Every miss inside the window costs a
+        // tier, down to the floor - logging is always worth 1, so it never goes negative.
+        if (graceAt === null || (di - graceAt) >= GRACE_EVERY) graceAt = di;
         else {
           const t = tierOf(chain);
           chain = t > 0 ? TIER_DAYS[t-1] : 0;
           runDrops++;
         }
-        if (chain === 0) graceUsed = false;
+        if (chain === 0) graceAt = null;      // back to the floor is a fresh start
       }
+      di++;
     }
   }
-  const res = { points, chain, tier: tierPoints(chain), graceUsed, runDrops };
+  const last = di - 1;
+  const graceReady = graceAt === null || (last - graceAt) >= GRACE_EVERY;
+  const res = { points, chain, tier: tierPoints(chain), runDrops,
+                graceReady, graceIn: graceReady ? 0 : GRACE_EVERY - (last - graceAt) };
   _chainCache[h.id] = res;
   return res;
 }
@@ -1353,8 +1361,10 @@ function chainStrip(h){
       let first = i + 1;
       while (first < last && !info[first].logged) first++;
       const l = (first / N_DAYS) * 100, w = ((last - first + 1) / N_DAYS) * 100;
-      ring = '<div class="chainRing'+(openLeft?' openL':'')+'" style="left:'+l.toFixed(2)+
-        '%;width:'+w.toFixed(2)+'%"></div>';
+      // calc() widens it 2px past the slot on each side; percentages alone would sit
+      // flush against the rounded cap of the last segment.
+      ring = '<div class="chainRing'+(openLeft?' openL':'')+'" style="left:calc('+l.toFixed(2)+
+        '% - 2px);width:calc('+w.toFixed(2)+'% + 4px)"></div>';
     }
   }
   return '<div class="ribbon"><div class="rtrack"></div>'+ring+
@@ -1622,9 +1632,10 @@ function tierNote(h){
   return head+' · '+need+' more for '+(t+2);
 }
 function graceNote(h){
-  return chainRun(h).graceUsed
-    ? 'Free day spent — the next miss costs a point.'
-    : 'One free day still in hand.';
+  const r = chainRun(h);
+  return r.graceReady
+    ? 'One free day in hand — a second miss would cost a point.'
+    : 'Free day used — back in '+r.graceIn+' day'+(r.graceIn===1?'':'s')+', a miss costs a point until then.';
 }
 // Chain line plus grace line, so callers keep a single insertion point.
 function chainNote(h){

@@ -961,6 +961,37 @@ Verified across three shapes: a 14-day chain with a grace gap rings from 28.57% 
 71.43% and bridges the gap; a plain 5-day streak (tier 1) gets no ring at all; a 40-day
 chain rings the full width with `openL` set. → `sw.js v40`.
 
+### 2026-08-15 (later) — Grace regenerates fortnightly; ring geometry evened out
+
+**The free skip was once per chain**, set on the first miss and never restored unless the
+chain fell to the floor. Asked directly what happens on "2-week chain, miss, log, miss,
+log", the answer was that the second miss cost a tier — a single free day for the entire
+life of a chain. That was flagged as too harsh when v29 shipped it, and it is: eight
+months of work earning one sick day of slack.
+
+Now **one free skip per `GRACE_EVERY` (14) days, at every tier**. `chainRun` tracks the
+day index the grace was last spent rather than a boolean, so it comes back on a timer.
+Falling to the floor still resets it, since that is a fresh start.
+
+Verified against four shapes (pattern written oldest → newest, `L` logged, `.` missed):
+
+| pattern | result |
+|---|---|
+| 14×L, `.`, L, `.`, L — the case asked about | chain 1, **1 pt** — second miss costs |
+| 14×L, `.`, LLL | chain 17, 2 pts, next free day in 11 |
+| 14×L, `.`, 15×L, `.`, LL — misses a fortnight apart | chain 31, **3 pts** — both free |
+| 14×L, `..`, LL — back to back | chain 2, 1 pt — first free, second costs |
+
+The grace line now names the timer: "Free day used — back in 11 days, a miss costs a
+point until then."
+
+**Ring geometry.** It sat flush against the rounded cap of the last segment, because the
+percentage bounds matched the slot bounds exactly, while leaving 3.5px of slack above and
+below. Now a consistent **2px clear on all four sides with a 2px line** — vertical from a
+fixed top/height, horizontal via `calc(% ± 2px)`, since percentages alone cannot express
+a fixed gap. Measured at exactly 2/2/2/2. The open left edge on an off-screen chain is
+unchanged. → `sw.js v41`.
+
 ---
 
 ## Still to do / open items
