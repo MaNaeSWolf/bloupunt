@@ -1029,6 +1029,33 @@ which is information rather than an invitation.
 Ring clearance raised from 2px to **4px on all four sides**; it read as touching at 2.
 Measured at exactly 4/4/4/4. → `sw.js v42`.
 
+### 2026-08-15 (later) — Time stats: rank on clean days, display on real ones
+v38 folded the "didn't happen" marker into every time average. Half right, and the wrong
+half showed: a card read "usually 08:12" for a habit whose real slips are around 14:00,
+because end-of-day markers are not clock readings and were dragging a *clock* average
+somewhere no slip ever happened.
+
+They are two different questions and now use two different samples:
+
+- **"When do I usually do it?"** — Usual, Best, the weekday time, and the "later than
+  usual" delta all use **only days it actually happened**. A day it never happened has no
+  clock reading to contribute.
+- **"Which day am I best on?"** — the strongest/weakest *ranking* still counts a clean
+  day as end of day, so a weekday you always avoid ranks best, which is the truth.
+
+A weekday with nothing but clean days has no time to show and reads **"never"**.
+
+Verified with real slips fixed at 14:00 and Sundays always clean: Usual now reads
+**14:00** (it would have been 15:27 with the markers folded in), and Sunday still ranks
+strongest, displayed as "never". A half-clean Wednesday ranks best on its clean days
+while displaying **10:00**, the average of its actual slips — which is the whole point of
+the split.
+
+**Tiers were already cumulative.** Asked to confirm 3 points lands at 30 clean days
+rather than 14+30: `TIER_DAYS` is `[0,14,30,60,120,240,480]` tested against the clean run
+directly, so 13→1pt, 14→2, 29→2, **30→3**, 60→4, 120→5. No change; recorded here so the
+question does not have to be asked twice. → `sw.js v43`.
+
 ---
 
 ## Still to do / open items
