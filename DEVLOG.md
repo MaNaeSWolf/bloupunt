@@ -1080,6 +1080,29 @@ going forward, but anything converted before that kept its old numbers. This is 
 calendar editor matters beyond convenience — it is the only way to find and fix them.
 → `sw.js v44`.
 
+### 2026-08-15 (later) — "Clear to here", and the 08:12 mystery solved
+The user found it with the new calendar editor: days reading **00:03**. Confirmed
+counter-era leftovers — `bump()` stores small integers, and a `plusminus` habit also
+stores a literal **0** for a net-zero day (press − then +, which the app deliberately
+supports). Converted to a `time` habit those become 00:00 and 00:03, and they drag every
+clock average toward midnight. The v20 family-change wipe prevents this now; anything
+converted before it kept its numbers.
+
+Worth being explicit about why this was not fixed by ignoring zeros in the average: a
+stored 0 **is a logged day**. It was also inflating the chain and the points, not just
+the times. Silently skipping it in one calculation would have left the other two wrong
+and hidden the cause. The data had to be corrected, not worked around.
+
+Added **"Clear to here"** to the day chip: clears the open day and everything before it,
+behind a confirm that names the count and the date ("Clear 25 days up to and including
+Sat 1 Aug?"). One sweep instead of tapping through weeks of junk, and it generalises —
+any habit whose early history is noise can be given a clean start date.
+
+Verified on the reported shape (25 junk days of 0 and 3, then 19 real logs at
+13:00–14:20): "usual" **05:56 → 13:42**, logged days 44 → 19, chain 44 → 19, no
+sub-minute values left. The chain drop is the point — those days had been counted as
+logged all along. → `sw.js v45`.
+
 ---
 
 ## Still to do / open items

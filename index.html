@@ -413,6 +413,7 @@ let noticeTimer = null;
 let pauseOpen = false;      // pause-days chooser open
 let dayEdit   = null;       // { id, key } — the strip day-edit chip target
 let clearHist = null;       // habit id whose "clear all history" is awaiting confirm
+let chipCut   = null;       // day key whose "clear to here" is awaiting confirm
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -1041,7 +1042,7 @@ window.setScreen = s => {
   grab(); screen = s; editing = null; confirm = null; dayEdit = null; clearHist = null; render();
 };
 
-window.toggleExpand = id => { expanded = (expanded === id) ? null : id; dayEdit = null; render(); };
+window.toggleExpand = id => { expanded = (expanded === id) ? null : id; dayEdit = null; chipCut = null; render(); };
 
 // Counter logging. Net value persists even at 0 - the goal is to log, so a day
 // with any interaction counts as logged. No milestones/flash: counters are trackers.
@@ -1116,11 +1117,27 @@ window.resumeNow = () => {
 
 // Day-edit chip (opened from a strip cell). openDay toggles it for that cell.
 window.openDay  = (id, k) => { dayEdit = (dayEdit && dayEdit.id===id && dayEdit.key===k) ? null : { id, key:k }; render(); };
-window.closeDay = () => { dayEdit = null; render(); };
+window.closeDay = () => { dayEdit = null; chipCut = null; render(); };
+
+/* Clear this day and everything before it. A habit converted from another type keeps
+   the old type's numbers, and they are not harmless: a counter's net-zero day is a
+   stored 0, which as a clock time is midnight and drags every average toward it. Those
+   days also still count as LOGGED, so they inflate the chain and the points too.
+   Deleting the keys is the only honest fix - the alternative, quietly ignoring zeros,
+   would throw away a real midnight log and hide the problem rather than solve it. */
+window.askClearTo = k => { chipCut = k; render(); };
+window.cancelClearTo = () => { chipCut = null; render(); };
+window.doClearTo = (id, k) => {
+  const h = data.habits.find(x => x.id === id);
+  if (h) for (const key of Object.keys(h.days)) if (key <= k) delete h.days[key];
+  chipCut = null;
+  save(); render();
+};
 // Step the open chip one day at a time, so a run of days can be corrected without
 // hunting for each cell. Never walks into the future.
 window.stepDay = (id, delta) => {
   if (!dayEdit || dayEdit.id !== id) return;
+  chipCut = null;
   const d = parseKey(dayEdit.key);
   d.setDate(d.getDate() + delta);
   if (d > midnight()) return;
@@ -1491,12 +1508,22 @@ function dayChip(h){
       : '<button class="chipBtn" onclick="setDone('+h.id+',\''+k+'\')">Mark done</button>';
   }
   const atToday = k >= todayKey();
+  const older = Object.keys(h.days).filter(x => x <= k).length;
+  if (chipCut === k)
+    return '<div class="chip">'+
+      '<span class="chipDate">Clear '+older+' day'+(older===1?'':'s')+' up to and including '+
+        label+'? Can\u2019t be undone.</span>'+
+      '<button class="chipBtn clear" onclick="doClearTo('+h.id+',\''+k+'\')">Clear</button>'+
+      '<button class="chipBtn" onclick="cancelClearTo()">Keep</button>'+
+    '</div>';
   return '<div class="chip">'+
     '<button class="chipNav" aria-label="Previous day" onclick="stepDay('+h.id+',-1)">\u2039</button>'+
     '<span class="chipDate">'+label+'</span>'+
     '<button class="chipNav"'+(atToday?' disabled':'')+' aria-label="Next day" '+
       'onclick="stepDay('+h.id+',1)">\u203a</button>'+
     controls +
+    (older ? '<button class="chipBtn clear" title="Clear this day and everything before it" '+
+      'onclick="askClearTo(\''+k+'\')">Clear to here</button>' : '')+
     '<button class="chipX" aria-label="Close" onclick="closeDay()">×</button>'+
   '</div>';
 }
