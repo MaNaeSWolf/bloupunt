@@ -992,6 +992,43 @@ fixed top/height, horizontal via `calc(% ± 2px)`, since percentages alone canno
 a fixed gap. Measured at exactly 2/2/2/2. The open left edge on an off-screen chain is
 unchanged. → `sw.js v41`.
 
+### 2026-08-15 (later) — A tier must be EARNED clean
+
+The free day was being spent to *climb*. A card showed 2 points off 14 logged days that
+had a grace day inside them — so two points never actually meant two unbroken weeks, and
+the ladder meant nothing.
+
+**A tier is now earned only by a clean run of that many days.** `chainRun` tracks
+`run` (clean consecutive logged days, paused days still bridging) and `lvl` (the level
+you hold) as separate things. A miss always resets `run`; the only question is whether
+the level survives it — covered by the fortnightly free day, or a drop of one tier. So
+the free day protects what you have and can never buy the next rung: after using one at
+2 points you need a **full clean month** for the third, exactly as if you had never
+missed.
+
+Verified (oldest → newest, `L` logged, `.` missed):
+
+| pattern | run | points |
+|---|---|---|
+| 9×L `.` 5×L — **the reported card** | 5 | **1** (was 2) |
+| 14×L clean | 14 | **2** |
+| 13×L | 13 | 1 |
+| 14×L `.` 3×L — grace after earning | 3 | **2 held** |
+| 14×L `.` 30×L | 30 | **3** |
+| 14×L `.` 20×L | 20 | 2 — not enough for the third |
+| 30×L `.` LL `.` LL — second miss inside the fortnight | 2 | 3 → **2** |
+| 30×L `.` 15×L `.` LL — misses a fortnight apart | 2 | **3 held** |
+
+**The free day is no longer named anywhere on a card.** The standing line and the
+countdown to the next one are gone. Naming it turns a safety net into a budget to spend,
+and a timer counting down to permitted failure is not a target worth putting in front of
+anyone — this app is for building the habit, not for managing its erosion. What happened
+is still explained *after* a miss ("your level held, but the clean run starts again"),
+which is information rather than an invitation.
+
+Ring clearance raised from 2px to **4px on all four sides**; it read as touching at 2.
+Measured at exactly 4/4/4/4. → `sw.js v42`.
+
 ---
 
 ## Still to do / open items

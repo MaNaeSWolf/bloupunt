@@ -152,9 +152,9 @@
   .bar.paused,.cell.paused,.scell.paused{box-shadow:inset 0 0 0 2px #A2BECE}
   .ribbon{position:relative;margin:14px 0 0 44px;height:22px}
   /* 2px clear of the segments on every side, so it never kisses a rounded cap. */
-  .chainRing{position:absolute;top:1.5px;height:19px;border:2px solid var(--sageDeep);
-    border-radius:10px;opacity:.45;pointer-events:none;z-index:2}
-  .chainRing.openL{border-left:none;border-radius:0 10px 10px 0}
+  .chainRing{position:absolute;top:-0.5px;height:23px;border:2px solid var(--sageDeep);
+    border-radius:12px;opacity:.45;pointer-events:none;z-index:2}
+  .chainRing.openL{border-left:none;border-radius:0 12px 12px 0}
   .rtrack{position:absolute;left:2px;right:2px;top:50%;height:4px;transform:translateY(-50%);background:var(--hair);border-radius:2px}
   .rrow{position:relative;display:flex;height:100%;z-index:1}
   .rslot{flex:1;display:grid;place-items:center;cursor:pointer}
@@ -837,35 +837,34 @@ function chainRun(h){
   if (_chainCache[h.id]) return _chainCache[h.id];
   const days = h.days || {}, paused = data.paused || {};
   const points = {};
-  let chain = 0, runDrops = 0, di = 0, graceAt = null;
+  // A tier is EARNED by a CLEAN run of that many days. The free day protects the level
+  // you already hold - it never counts toward the next one, so it cannot be spent to
+  // climb. Reaching two points has to mean two unbroken weeks, or the ladder means
+  // nothing. Either way a miss ends the clean run; the only question is whether the
+  // level survives it.
+  let lvl = 0, run = 0, di = 0, graceAt = null, runDrops = 0;
   const start = habitStart(h), end = midnight();
   if (start){
     for (const d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
       const k = keyFor(d);
-      if (has(days, k)){ chain++; runDrops = 0; points[k] = tierPoints(chain); }
+      if (has(days, k)){
+        run++; runDrops = 0;
+        while (lvl + 1 < TIER_DAYS.length && run >= TIER_DAYS[lvl+1]) lvl++;
+        points[k] = lvl + 1;
+      }
       else if (paused[k]){ /* bridges: neither builds nor breaks */ }
       else if (k === keyFor(end)){ /* today is grace until tomorrow */ }
       else {
-        // ONE free day per GRACE_EVERY days, at every tier. A single free skip for the
-        // whole life of a chain was too harsh at the top: eight months of work with one
-        // sick day of slack. Regenerating it on a timer keeps the cost of a genuine
-        // lapse while allowing for ordinary life. Every miss inside the window costs a
-        // tier, down to the floor - logging is always worth 1, so it never goes negative.
-        if (graceAt === null || (di - graceAt) >= GRACE_EVERY) graceAt = di;
-        else {
-          const t = tierOf(chain);
-          chain = t > 0 ? TIER_DAYS[t-1] : 0;
-          runDrops++;
-        }
-        if (chain === 0) graceAt = null;      // back to the floor is a fresh start
+        if (graceAt === null || (di - graceAt) >= GRACE_EVERY) graceAt = di;  // level holds
+        else { if (lvl > 0) lvl--; runDrops++; }
+        run = 0;                     // a miss always restarts the climb
       }
       di++;
     }
   }
-  const last = di - 1;
-  const graceReady = graceAt === null || (last - graceAt) >= GRACE_EVERY;
-  const res = { points, chain, tier: tierPoints(chain), runDrops,
-                graceReady, graceIn: graceReady ? 0 : GRACE_EVERY - (last - graceAt) };
+  const res = { points, run, lvl, tier: lvl + 1, runDrops,
+                need: lvl + 1 < TIER_DAYS.length ? TIER_DAYS[lvl+1] - run : 0,
+                graceReady: graceAt === null || (di - 1 - graceAt) >= GRACE_EVERY };
   _chainCache[h.id] = res;
   return res;
 }
@@ -1364,7 +1363,7 @@ function chainStrip(h){
       // calc() widens it 2px past the slot on each side; percentages alone would sit
       // flush against the rounded cap of the last segment.
       ring = '<div class="chainRing'+(openLeft?' openL':'')+'" style="left:calc('+l.toFixed(2)+
-        '% - 2px);width:calc('+w.toFixed(2)+'% + 4px)"></div>';
+        '% - 4px);width:calc('+w.toFixed(2)+'% + 8px)"></div>';
     }
   }
   return '<div class="ribbon"><div class="rtrack"></div>'+ring+
@@ -1615,8 +1614,8 @@ function missNote(h, s){
   const r = chainRun(h);
   if (s.missed >= 2) return 'Missed '+s.missed+' in a row — each further day costs another point';
   return r.runDrops > 0
-    ? 'Missed yesterday — your free day was already spent, so that cost a point'
-    : 'Missed yesterday — that was your one free day. The next one costs.';
+    ? 'Missed yesterday — that cost a point'
+    : 'Missed yesterday — your level held, but the clean run starts again';
 }
 
 // Where the ladder goes next, and what is riding on it.
@@ -1624,23 +1623,18 @@ function missNote(h, s){
 // chain but breaks the streak - so the points line states the chain outright. Without
 // it, "2 pts" beside "5 days running" reads as a contradiction.
 function tierNote(h){
-  const r = chainRun(h), t = tierOf(r.chain);
-  const head = 'Chain '+r.chain+' day'+(r.chain===1?'':'s')+
-    ' · worth '+r.tier+' pt'+(r.tier===1?'':'s')+' a day';
-  if (t + 1 >= TIER_DAYS.length) return head+' · nothing above this';
-  const need = TIER_DAYS[t+1] - r.chain;
-  return head+' · '+need+' more for '+(t+2);
-}
-function graceNote(h){
   const r = chainRun(h);
-  return r.graceReady
-    ? 'One free day in hand — a second miss would cost a point.'
-    : 'Free day used — back in '+r.graceIn+' day'+(r.graceIn===1?'':'s')+', a miss costs a point until then.';
+  const head = 'Clean run '+r.run+' day'+(r.run===1?'':'s')+
+    ' · worth '+r.tier+' pt'+(r.tier===1?'':'s')+' a day';
+  if (r.lvl + 1 >= TIER_DAYS.length) return head+' · nothing above this';
+  return head+' · '+r.need+' clean day'+(r.need===1?'':'s')+' for '+(r.tier+1);
 }
-// Chain line plus grace line, so callers keep a single insertion point.
+// No standing line about the free day, and no countdown to the next one. Naming it
+// turns a safety net into a budget to spend, and a timer to failure is not a target
+// worth putting in front of anyone. What happened is explained after a miss instead
+// (see missNote), which is information rather than an invitation.
 function chainNote(h){
-  return '<div class="next">'+tierNote(h)+'</div>'+
-         '<div class="next">'+graceNote(h)+'</div>';
+  return '<div class="next">'+tierNote(h)+'</div>';
 }
 
 // What this habit is worth per logged day. Shown once it climbs above the baseline,
