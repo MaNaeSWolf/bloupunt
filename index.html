@@ -135,6 +135,9 @@
   .chipBtn.clear{color:var(--clay)}
   .chipNum{min-width:22px;text-align:center;font-family:'Fraunces',Georgia,serif;font-size:18px;color:var(--ink)}
   .chipX{background:none;color:var(--soft);font-size:18px;padding:2px 6px;margin-left:auto}
+  .chipNav{background:var(--bg);border:1px solid var(--faint);color:var(--ink);
+    border-radius:8px;padding:3px 10px;font-size:15px;line-height:1.1}
+  .chipNav:disabled{opacity:.35;cursor:default}
   .ord{display:flex;flex-direction:column;gap:3px;flex-shrink:0;margin-right:2px}
   .ordBtn{width:26px;height:20px;border-radius:6px;border:1px solid var(--faint);
     background:var(--bg);color:var(--soft);font-size:12px;line-height:1;display:grid;place-items:center;padding:0}
@@ -146,10 +149,13 @@
   .floorD{font-size:13px;color:var(--soft);line-height:1.55}
   .floorD strong{color:var(--ink);font-weight:500}
 
+  .cell{cursor:pointer}
+  .cell.future{cursor:default}
   .cell.marked{box-shadow:inset 0 0 0 1px rgba(61,59,55,.34)}
   /* After .marked on purpose: a paused day must stay visible even when it was also
      logged, which is precisely when people lose track of their own breaks. */
   .bar.paused,.cell.paused,.scell.paused{box-shadow:inset 0 0 0 2px #A2BECE}
+  .cell.sel{box-shadow:inset 0 0 0 2px var(--ink);transform:scale(1.4)}
   .ribbon{position:relative;margin:14px 0 0 44px;height:22px}
   /* 2px clear of the segments on every side, so it never kisses a rounded cap. */
   .chainRing{position:absolute;top:-0.5px;height:23px;border:2px solid var(--sageDeep);
@@ -157,7 +163,7 @@
   .chainRing.openL{border-left:none;border-radius:0 12px 12px 0}
   .rtrack{position:absolute;left:2px;right:2px;top:50%;height:4px;transform:translateY(-50%);background:var(--hair);border-radius:2px}
   .rrow{position:relative;display:flex;height:100%;z-index:1}
-  .rslot{flex:1;display:grid;place-items:center;cursor:pointer}
+  .rslot{flex:1;display:grid;place-items:center}
   .seg{width:100%;height:15px;transition:transform 150ms ease}
   .seg.gap{background:transparent!important;height:4px}
   .seg.s1{border-radius:8px 0 0 8px}
@@ -1035,7 +1041,7 @@ window.setScreen = s => {
   grab(); screen = s; editing = null; confirm = null; dayEdit = null; clearHist = null; render();
 };
 
-window.toggleExpand = id => { expanded = (expanded === id) ? null : id; render(); };
+window.toggleExpand = id => { expanded = (expanded === id) ? null : id; dayEdit = null; render(); };
 
 // Counter logging. Net value persists even at 0 - the goal is to log, so a day
 // with any interaction counts as logged. No milestones/flash: counters are trackers.
@@ -1111,6 +1117,16 @@ window.resumeNow = () => {
 // Day-edit chip (opened from a strip cell). openDay toggles it for that cell.
 window.openDay  = (id, k) => { dayEdit = (dayEdit && dayEdit.id===id && dayEdit.key===k) ? null : { id, key:k }; render(); };
 window.closeDay = () => { dayEdit = null; render(); };
+// Step the open chip one day at a time, so a run of days can be corrected without
+// hunting for each cell. Never walks into the future.
+window.stepDay = (id, delta) => {
+  if (!dayEdit || dayEdit.id !== id) return;
+  const d = parseKey(dayEdit.key);
+  d.setDate(d.getDate() + delta);
+  if (d > midnight()) return;
+  dayEdit = { id, key: keyFor(d) };
+  render();
+};
 window.setDone  = (id, k) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
@@ -1320,8 +1336,7 @@ function chainStrip(h){
   }
 
   const cells = info.map((x,i) => {
-    const act = 'openDay('+h.id+',\''+x.k+'\')';
-    const lab = 'Edit '+x.k+(counter?(', '+(h.days[x.k]||0)):(x.logged?', done':', not done'));
+    const lab = x.k+(counter?(', '+(h.days[x.k]||0)):(x.logged?', done':', not done'));
     let inner;
     if (x.today && !x.logged){
       inner = '<div class="tdot"></div>';                       // today, not yet logged
@@ -1336,8 +1351,7 @@ function chainStrip(h){
       const fill = x.logged ? x.bg : PAUSE_SEG;
       inner = '<div class="seg '+shape+div+(x.sel?' selSeg':'')+'" style="background:'+fill+'"></div>';
     }
-    return '<div class="rslot" role="button" tabindex="0" aria-label="'+lab+'" onclick="'+act+'" '+
-      'onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}">'+inner+'</div>';
+    return '<div class="rslot" aria-label="'+lab+'">'+inner+'</div>';
   }).join('');
 
   // Ring the run that is currently earning EXTRA points, so a chain worth more than
@@ -1414,9 +1428,13 @@ function fullGrid(h){
   // only through the day chip on the 21-day strip, so nothing here can be mis-tapped.
   const cols = weeks.map(w => '<div class="wk">' + w.map(d => {
     const future = d > now, k = keyFor(d);
-    const cls = 'cell'+(future?' future':'')+(k===today?' today':'')+((data.paused && data.paused[k])?' paused':'')+(has(h.days,k)?' marked':'');
+    const sel = (dayEdit && dayEdit.id===h.id && dayEdit.key===k) ? ' sel' : '';
+    const cls = 'cell'+(future?' future':'')+(k===today?' today':'')+((data.paused && data.paused[k])?' paused':'')+(has(h.days,k)?' marked':'')+sel;
     const bg  = graded ? col(d) : shade(h,d);
-    return '<div class="'+cls+'" style="background:'+bg+'"></div>';
+    const act = 'openDay('+h.id+',\''+k+'\')';
+    return '<div class="'+cls+'" style="background:'+bg+'"'+(future ? '' :
+      ' role="button" tabindex="0" aria-label="Edit '+k+'" onclick="'+act+'"'+
+      ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();'+act+'}"')+'></div>';
   }).join('') + '</div>').join('');
 
   return '<div class="gridWrap"><div class="gridIn">'+
@@ -1472,8 +1490,12 @@ function dayChip(h){
       ? '<button class="chipBtn on" onclick="clearDay('+h.id+',\''+k+'\')">Done ✓ · tap to clear</button>'
       : '<button class="chipBtn" onclick="setDone('+h.id+',\''+k+'\')">Mark done</button>';
   }
+  const atToday = k >= todayKey();
   return '<div class="chip">'+
+    '<button class="chipNav" aria-label="Previous day" onclick="stepDay('+h.id+',-1)">\u2039</button>'+
     '<span class="chipDate">'+label+'</span>'+
+    '<button class="chipNav"'+(atToday?' disabled':'')+' aria-label="Next day" '+
+      'onclick="stepDay('+h.id+',1)">\u203a</button>'+
     controls +
     '<button class="chipX" aria-label="Close" onclick="closeDay()">×</button>'+
   '</div>';
@@ -1522,10 +1544,7 @@ function timeGraph(h){
 
   const dots = info.map((x,i) => {
     const cx = xOf(i).toFixed(2)+'%';
-    const hit = '<rect x="'+((i/N_DAYS)*100).toFixed(2)+'%" y="0" width="'+(100/N_DAYS).toFixed(2)+
-      '%" height="'+GH+'" fill="transparent" style="cursor:pointer" role="button" tabindex="0" '+
-      'aria-label="Edit '+x.k+(x.logged?', '+fmtTime(x.v):', not logged')+'" '+
-      'onclick="openDay('+h.id+',\''+x.k+'\')"></rect>';
+    const hit = '';                    // editing lives on the calendar now
     if (!x.logged){
       const y = GH - GPAD - (GH - GPAD*2)/2;
       const c = x.today ? '<circle cx="'+cx+'" cy="'+y+'" r="3.2" fill="none" stroke="var(--soft)" stroke-width="1.4"/>'
@@ -1586,7 +1605,7 @@ function timeRow(h, today){
         '<div><div class="sl">Best</div><div class="sv">'+(best===null?'—':fmtTime(best))+'</div></div>'+
         '<div><div class="sl">Clean</div><div class="sv">'+clean+'/'+n30+'</div></div>'+
       '</div>';
-    expBlock = '<div class="exp">'+ details + fullGrid(h) + statBlock +
+    expBlock = '<div class="exp">'+ details + fullGrid(h) + dayChip(h) + statBlock +
       dayStatsBlock(h) + chainNote(h) + '</div>';
   }
 
@@ -1608,7 +1627,7 @@ function timeRow(h, today){
       '<button class="tNone'+(clean?' on':'')+'"'+(logged?' disabled':'')+
         ' onclick="logNone('+h.id+')">'+(clean ? 'Didn’t happen ✓' : 'Didn’t happen')+'</button>'+
     '</div>'+
-    riskBlock(risk) + timeGraph(h) + dayChip(h) + expBlock +
+    riskBlock(risk) + timeGraph(h)  + expBlock +
   '</div>';
 }
 
@@ -1760,7 +1779,7 @@ function counterRow(h, today){
         '<div><div class="sl">7-day avg</div><div class="sv">'+avg+'</div></div>'+
       '</div>'+
       '<div class="next">Today '+v+' · '+logged+'/30 logged · total '+tot+'</div>';
-    expBlock = '<div class="exp">'+ details + fullGrid(h) + statBlock +
+    expBlock = '<div class="exp">'+ details + fullGrid(h) + dayChip(h) + statBlock +
       dayStatsBlock(h) + nextLine + chainNote(h) + '</div>';
   }
 
@@ -1774,7 +1793,7 @@ function counterRow(h, today){
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
-    riskBlock(risk) + chainStrip(h) + dayChip(h) + expBlock +
+    riskBlock(risk) + chainStrip(h)  + expBlock +
   '</div>';
 }
 
@@ -2073,7 +2092,7 @@ function habitRow(h){
         '<div><div class="sl">Best</div><div class="sv">'+s.best+'</div></div>'+
         '<div><div class="sl">Last 30</div><div class="sv">'+s.last30+'/30</div></div>'+
       '</div>';
-    expBlock = '<div class="exp">'+ details + fullGrid(h) + statBlock +
+    expBlock = '<div class="exp">'+ details + fullGrid(h) + dayChip(h) + statBlock +
       dayStatsBlock(h) + nextLine + chainNote(h) + '</div>';
   }
 
@@ -2089,7 +2108,7 @@ function habitRow(h){
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
-    floorBlock + riskBlock(risk) + chainStrip(h) + dayChip(h) + expBlock +
+    floorBlock + riskBlock(risk) + chainStrip(h)  + expBlock +
   '</div>';
 }
 

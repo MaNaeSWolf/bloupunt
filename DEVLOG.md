@@ -1056,6 +1056,30 @@ rather than 14+30: `TIER_DAYS` is `[0,14,30,60,120,240,480]` tested against the 
 directly, so 13→1pt, 14→2, 29→2, **30→3**, 60→4, 120→5. No change; recorded here so the
 question does not have to be asked twice. → `sw.js v43`.
 
+### 2026-08-15 (later) — Day editing moves to the calendar
+
+Editing lived on the 21-day strip, which is the wrong surface for it: 21 tap targets a
+few pixels wide, and no way to reach anything older than three weeks. It is now on the
+**month grid** — every visible day is tappable, past days only — and the chip gained
+**‹ ›** buttons so a run of days can be corrected without hunting for each cell. The chip
+renders directly under the calendar, the selected day is ringed and scaled, and
+collapsing a card closes it. The strip and the time graph are now read-only.
+
+Verified: 124 editable cells with future days inert, the strip carries no edit action,
+the chip opens under the calendar with both arrows, and prev/next round-trips exactly.
+
+**On the "usual 08:12" report** — reproduced, and it is not the averaging. Seeding a time
+habit whose real logs all sit between 13:00 and 14:20, plus four stray sub-minute values,
+reproduces the symptom precisely: "usual" reads **11:25** and a weekday reads **06:46** —
+earlier than any real log, exactly as reported. Deleting the strays restores **13:35**.
+
+Those strays are almost certainly counter-era values. `bump()` writes small integers
+(1, 2, 3…) and as clock times those are 00:01–00:03; a habit that was a counter before
+being switched to `time` carries them. The family-change wipe added in v20 prevents this
+going forward, but anything converted before that kept its old numbers. This is why the
+calendar editor matters beyond convenience — it is the only way to find and fix them.
+→ `sw.js v44`.
+
 ---
 
 ## Still to do / open items
