@@ -174,8 +174,11 @@
     background:var(--ink);color:#F7F4EF;font-size:11.5px;line-height:1;white-space:nowrap;
     padding:5px 8px;border-radius:7px;pointer-events:none;
     font-variant-numeric:tabular-nums;box-shadow:0 2px 8px rgba(61,59,55,.18)}
-  .peekD{color:#BDB6AB;margin-right:7px}
-  .peekD:only-child{color:#F7F4EF;margin-right:0}
+  .peekD{color:#BDB6AB}
+  .peekD::after{content:' · '}                 /* the app's own separator */
+  /* With nothing beside it the date IS the content, so it reads at full strength. */
+  .peek.dateOnly .peekD{color:#F7F4EF}
+  .peek.dateOnly .peekD::after{content:none}
   .peek::after{content:'';position:absolute;top:100%;left:var(--car,50%);transform:translateX(-50%);
     border:4px solid transparent;border-top-color:var(--ink);border-bottom:none}
   .sslot{cursor:pointer}
@@ -1445,8 +1448,14 @@ function peekBubble(h, k, i, n){
   const when = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+d.getDate()+
     ' '+MONTHS[d.getMonth()];
   const v = peekValue(h, k);
-  return '<div class="peek" style="left:'+(((i + 0.5) / n) * 100).toFixed(2)+'%">'+
-    '<span class="peekD">'+when+'</span>'+(v ? esc(v) : '')+'</div>';
+  // The date-only case is flagged on the bubble, not inferred from the markup. It used
+  // to lean on .peekD:only-child, which counts ELEMENT children - the value is a bare
+  // text node, so the span always matched and every bubble lost its separator and took
+  // the wrong colour ("Mon 10 Aug11:23").
+  return '<div class="peek'+(v ? '' : ' dateOnly')+'" style="left:'+
+      (((i + 0.5) / n) * 100).toFixed(2)+'%">'+
+    '<span class="peekD">'+when+'</span>'+(v ? '<span class="peekV">'+esc(v)+'</span>' : '')+
+  '</div>';
 }
 
 function chainStrip(h){

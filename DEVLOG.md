@@ -1277,6 +1277,33 @@ clears the grid edge by exactly 3px on both calendars; the bubble is up at 2s, g
 3.8s, dismissed by a tap on the header, and moved (not closed) by a tap on another day.
 → `sw.js v49`.
 
+### 2026-08-21 (later) — "Mon 10 Aug11:23"
+
+The bubble had no separator between the date and the value. The cause is a good one to
+remember: the styling leaned on `.peekD:only-child`, and **`:only-child` counts element
+children**. The value was a bare text node, so the date span was always "only", always
+got `margin-right:0`, and always took the full-strength colour meant for the date-only
+cards. Both halves of the rule were firing on exactly the bubbles they were written to
+exclude.
+
+Fixed by stating the case rather than inferring it: the bubble carries a `dateOnly`
+class, the value gets a `.peekV` span of its own, and the separator is a ` · ` on
+`.peekD::after` — the same middle dot the stats lines already use. Date muted, value at
+full strength, which is what the colours were always for.
+
+**And a trap worth writing down.** The first attempt wrote the separator as the CSS
+escape `\00b7`. It passed through a shell heredoc and a Python string on the way into the
+file and arrived as `\0` — an *octal* escape — producing a real NUL byte followed by the
+literal text `b7`. The browser rendered a replacement glyph, and grep started reporting
+`index.html` as a binary file, which is what gave it away. Written as the literal
+character it is fine. The patch scripts now assert `"\x00" not in t` before writing,
+because a NUL is invisible in every view except a hex dump.
+
+Swept the rest of the app for the same class of fault while it was open — every card type
+expanded plus the manage screen, checking for glued tokens, doubled separators and
+runaway whitespace. The only hits were `8pm` (a real cue value) crossing a line break.
+`.insH:first-child` was checked too and genuinely matches. → `sw.js v50`.
+
 ---
 
 ## Still to do / open items
