@@ -1544,7 +1544,7 @@ function timeRow(h, today){
         '<div><div class="sl">Usual</div><div class="sv">'+(base===null?'—':fmtTime(Math.round(base)))+'</div></div>'+
         '<div><div class="sl">Best</div><div class="sv">'+(best===null?'—':fmtTime(best))+'</div></div>'+
         '<div><div class="sl">Clean</div><div class="sv">'+clean+'/'+n30+'</div></div>'+
-      '</div>'+ '<div class="next">'+tierNote(h)+'</div>' + dayStatsBlock(h) + fullGrid(h) + '</div>';
+      '</div>'+ chainNote(h) + dayStatsBlock(h) + fullGrid(h) + '</div>';
   }
 
   const clean = logged && v >= NONE_MIN;      // marked "didn't happen" - still revocable
@@ -1580,14 +1580,26 @@ function missNote(h, s){
 }
 
 // Where the ladder goes next, and what is riding on it.
+// The chain and the streak are different lengths on purpose - a grace day bridges the
+// chain but breaks the streak - so the points line states the chain outright. Without
+// it, "2 pts" beside "5 days running" reads as a contradiction.
 function tierNote(h){
   const r = chainRun(h), t = tierOf(r.chain);
-  const grace = r.graceUsed
+  const head = 'Chain '+r.chain+' day'+(r.chain===1?'':'s')+
+    ' · worth '+r.tier+' pt'+(r.tier===1?'':'s')+' a day';
+  if (t + 1 >= TIER_DAYS.length) return head+' · nothing above this';
+  const need = TIER_DAYS[t+1] - r.chain;
+  return head+' · '+need+' more for '+(t+2);
+}
+function graceNote(h){
+  return chainRun(h).graceUsed
     ? 'Free day spent — the next miss costs a point.'
     : 'One free day still in hand.';
-  if (t + 1 >= TIER_DAYS.length) return 'Nothing above this. Just keep it. · '+grace;
-  const need = TIER_DAYS[t+1] - r.chain;
-  return need+' day'+(need===1?'':'s')+' to '+(t+2)+' points a day. · '+grace;
+}
+// Chain line plus grace line, so callers keep a single insertion point.
+function chainNote(h){
+  return '<div class="next">'+tierNote(h)+'</div>'+
+         '<div class="next">'+graceNote(h)+'</div>';
 }
 
 // What this habit is worth per logged day. Shown once it climbs above the baseline,
@@ -1697,7 +1709,7 @@ function counterRow(h, today){
     let tot=0, logged=0; const c2=midnight();
     for (let i=0;i<30;i++){ const k=keyFor(c2); if (has(h.days,k)){ tot+=h.days[k]; logged++; } c2.setDate(c2.getDate()-1); }
     let nextLine=''; const nx = STREAK_MARKS.find(m => m.d > s.streak);
-    if (nx && s.streak >= 3){ const away = nx.d - s.streak; nextLine = '<div class="next">'+away+' day'+(away===1?'':'s')+' to '+nx.label.toLowerCase()+'</div>'; }
+    if (nx && s.streak >= 3){ const away = nx.d - s.streak; nextLine = '<div class="next">Streak · '+away+' day'+(away===1?'':'s')+' to '+nx.label.toLowerCase()+'</div>'; }
     expBlock = '<div class="exp">'+ details +
       '<div class="stats">'+
         '<div><div class="sl">Streak</div><div class="sv">'+s.streak+'</div></div>'+
@@ -1705,7 +1717,7 @@ function counterRow(h, today){
         '<div><div class="sl">7-day avg</div><div class="sv">'+avg+'</div></div>'+
       '</div>'+
       '<div class="next">Today '+v+' · '+logged+'/30 logged · total '+tot+'</div>'+
-      '<div class="next">'+tierNote(h)+'</div>'+ dayStatsBlock(h)+
+      chainNote(h)+ dayStatsBlock(h)+
       nextLine + fullGrid(h) + '</div>';
   }
 
@@ -2009,7 +2021,7 @@ function habitRow(h){
     const nx = STREAK_MARKS.find(m => m.d > s.streak);
     if (nx && s.streak >= 3){
       const away = nx.d - s.streak;
-      nextLine = '<div class="next">'+away+' day'+(away===1?'':'s')+' to '+nx.label.toLowerCase()+'</div>';
+      nextLine = '<div class="next">Streak · '+away+' day'+(away===1?'':'s')+' to '+nx.label.toLowerCase()+'</div>';
     }
 
     expBlock = '<div class="exp">'+ details +
@@ -2017,7 +2029,7 @@ function habitRow(h){
         '<div><div class="sl">Streak</div><div class="sv">'+s.streak+'</div></div>'+
         '<div><div class="sl">Best</div><div class="sv">'+s.best+'</div></div>'+
         '<div><div class="sl">Last 30</div><div class="sv">'+s.last30+'/30</div></div>'+
-      '</div>'+ '<div class="next">'+tierNote(h)+'</div>' + dayStatsBlock(h) + nextLine + fullGrid(h) + '</div>';
+      '</div>'+ chainNote(h) + dayStatsBlock(h) + nextLine + fullGrid(h) + '</div>';
   }
 
   return '<div class="'+cls+'">'+

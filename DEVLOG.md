@@ -910,6 +910,30 @@ Verified: Sunday-always-clean now reads strongest; "Usual" rose to 14:35 with 13
 among 89 samples; "Best" reads None; and toggle and counter weekday stats are byte-for-byte
 unchanged. → `sw.js v38`.
 
+### 2026-08-15 (later) — Telling the chain and the streak apart
+Reported as "it says I need to wait 2 days before I can get a second point, but I'm
+already logging 2 points". Nothing was miscalculated — the card was right on every
+number, and unreadable anyway, which is the same problem from the user's side.
+
+The card showed **2 pts**, **5 days running**, then two lines in the same style:
+"16 days to 3 points a day" (about the **chain**) and "2 days to one week" (about the
+**streak**). Two adjacent "N days to …" lines measuring different quantities, with
+nothing saying which was which. The chain was 14 and the streak 5, both correct — a
+grace day bridges the chain but breaks the streak — but the card never showed the
+chain, so "2 pts" beside "5 days running" looked like a contradiction with no way to
+resolve it.
+
+- The points line now **states the chain outright**: "Chain 14 days · worth 2 pts a day
+  · 16 more for 3". The pill is traceable to something visible.
+- The grace note moved to its own line rather than trailing the tier note.
+- The milestone line is labelled: **"Streak · 2 days to one week"**. Phrasing it as
+  "a one week streak" was rejected — it becomes "a two weeks streak" at the next mark.
+
+A reminder that a correct number and a legible one are different tests, and only the
+second is worth anything to the person reading it. Verified by reproducing the exact
+card (chain 14, streak 5, 2 pts) and checking a plural milestone reads "Streak · 4 days
+to two weeks". → `sw.js v39`.
+
 ---
 
 ## Still to do / open items
