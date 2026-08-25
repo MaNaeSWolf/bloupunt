@@ -1571,6 +1571,51 @@ deferred render painted the expanded card with its calendar, and collapsing retu
 box to two lines. A stale guard now clears itself instead of freezing the app.
 → `sw.js v56`.
 
+### 2026-08-21 (later) — Two people
+
+Cora has been using the app, and the Mood and Journal cards were built for her. So: can
+two people use it without treading on each other?
+
+**Mostly it already worked, and it is worth saying why.** Sync settings have always been
+per-device — owner, repo, token and passphrase live in this browser's `localStorage` and
+nowhere else, and nothing about them is baked into the build. Two phones pointed at
+different repos have never shared a file. Nothing needed inventing.
+
+Two sharp edges did need attention, though, and one of them was in the copy rather than
+the code.
+
+**The file name was the only hardcoded part of the address.** `bloupunt.json`, always. So
+two people could only be kept apart by giving them separate repos — true today, but a
+property of the setup you had to remember rather than one you could see. It is a field
+now. Blank still means `bloupunt.json`, so every device configured before this keeps
+working with no change at all, which was the requirement: the working setup must not move.
+
+**The panel was giving the wrong instruction.** It read "Set once per device, then leave
+it. Same four values everywhere." Perfectly good advice for one person with two devices,
+and precisely the wrong advice now: shared settings mean two people writing over one
+file, and a shared passphrase means either can decrypt the other's journal. That last
+part matters more than it did a week ago — there is a diary in here now. The hint says
+what it should say: these belong to ONE person, each needs their own repo, token and
+passphrase, and the passphrase is the thing that keeps a journal private.
+
+**And the panel now names its target**: "Writing to owner/repo · file.json". A phone
+configured with the wrong credentials used to fail silently and destructively — it would
+union-merge one person's habits into the other's file with no visible sign. Now you can
+see where a device is pointed before you trust it.
+
+Verified: a config saved by v55, with no `file` key at all, produces exactly the same URL
+as before; a second person on their own repo and file resolves independently; two people
+in the SAME repo separated only by file name works too; and the field is sanitised, so
+whitespace, leading and trailing slashes, nested paths and `..` all flatten to a single
+harmless name rather than escaping the `contents/` path. → `sw.js v57`.
+
+**Not solved in code, because it should not be.** A fine-grained token is issued by the
+account that owns the repo. If Cora's data repo lives under this account, her phone would
+have to carry a token minted here — a credential for someone else's GitHub account
+sitting on her device. She is better off owning her own repo under her own account, with
+her own token and her own passphrase. The app is indifferent to which; the security is
+not.
+
 ---
 
 ## Still to do / open items

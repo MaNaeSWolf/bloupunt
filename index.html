@@ -329,6 +329,8 @@
   .syncHead{display:flex;justify-content:space-between;align-items:center;gap:10px}
   .syncStat{font-size:13px;color:var(--soft)}
   .divider{height:1px;background:var(--hair);margin:14px 0}
+  .syncTarget{font-size:12px;color:var(--sageDeep);margin-top:10px;
+    background:rgba(122,154,126,.10);border:1px solid #CBDCCD;border-radius:9px;padding:8px 10px}
   .syncTitle{font-size:11px;letter-spacing:.18em;color:var(--sageDeep);font-weight:600}
 
   @keyframes fall{0%{transform:translateY(-12vh) rotate(0deg);opacity:1}
@@ -449,7 +451,7 @@ try {
   }
 } catch(e){}
 
-let sync = { owner:'', repo:'', token:'', pass:'' };
+let sync = { owner:'', repo:'', token:'', pass:'', file:'' };
 try {
   const s = localStorage.getItem('bloupunt-sync');
   if (s) sync = { ...sync, ...JSON.parse(s) };
@@ -480,7 +482,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v56';
+const BUILD = 'bloupunt-v57';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -543,8 +545,21 @@ window.undo = () => {
    and anyone who obtains the file — sees ciphertext only.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Two people, two files. Everything here is already per-device - the settings live in
+   this browser's localStorage and nowhere else - so two phones pointed at different
+   repos have never shared a file. The file NAME was the one hardcoded part, which meant
+   two people could only be kept apart by giving them separate repos. Naming it makes
+   "her file, my file" something you can see and state, rather than a property of the
+   setup you have to remember. Blank means bloupunt.json, so every device configured
+   before this keeps working untouched. */
+const SYNC_FILE = 'bloupunt.json';
+const syncFile = () => {
+  const f = (sync.file || '').trim().replace(/^[/\\]+|[/\\]+$/g, '').replace(/[/\\]/g, '-');
+  if (!f) return SYNC_FILE;
+  return /\.json$/i.test(f) ? f : f + '.json';
+};
 const GH_URL = () =>
-  'https://api.github.com/repos/'+sync.owner.trim()+'/'+sync.repo.trim()+'/contents/bloupunt.json';
+  'https://api.github.com/repos/'+sync.owner.trim()+'/'+sync.repo.trim()+'/contents/'+syncFile();
 const GH_HEADERS = () => ({
   'Authorization':'Bearer '+sync.token.trim(),
   'Accept':'application/vnd.github+json',
@@ -1585,7 +1600,8 @@ window.closeCelebration = () => { celebration = null; render(); };
 window.toggleSyncPanel = () => { syncOpen = !syncOpen; render(); };
 window.saveSync = () => {
   const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
-  sync = { owner:v('inOwner'), repo:v('inRepo'), token:v('inToken'), pass:v('inPass') };
+  sync = { owner:v('inOwner'), repo:v('inRepo'), token:v('inToken'), pass:v('inPass'),
+           file:v('inFile') };
   try { localStorage.setItem('bloupunt-sync', JSON.stringify(sync)); } catch(e){}
   syncStatus = sync.token ? 'idle' : 'off';
   syncOpen = false;
@@ -2940,12 +2956,21 @@ function syncPanel(){
   const open = syncOpen ? (
     '<div class="divider"></div>'+
     '<div class="syncTitle">SYNC SETTINGS</div>'+
-    '<p class="hint">Set once per device, then leave it. Same four values everywhere. '+
-      'Use a fine-grained token scoped to the private data repo only. Your passphrase never leaves this device \u2014 '+
-      'lose it and the backup is unreadable.</p>'+
+    /* This used to read "same four values everywhere", which was true when one person
+       used it and is exactly the wrong instruction now: shared settings mean two people
+       writing over one file, and a shared passphrase means either can read the other's
+       journal. */
+    '<p class="hint">These belong to ONE person. Each person needs their own repo, their '+
+      'own fine-grained token scoped to it, and their own passphrase \u2014 the passphrase is '+
+      'what keeps a journal private, so sharing one hands over the diary. Set them once '+
+      'per device and leave them. Your passphrase never leaves this device: lose it and '+
+      'the backup is unreadable.</p>'+
+    (syncReady() ? '<p class="syncTarget">Writing to <strong>'+esc(sync.owner.trim())+'/'+
+      esc(sync.repo.trim())+'</strong> \u00b7 '+esc(syncFile())+'</p>' : '')+
     '<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">'+
       '<input id="inOwner" value="'+esc(sync.owner)+'" placeholder="GitHub username">'+
       '<input id="inRepo"  value="'+esc(sync.repo)+'"  placeholder="Private data repo (e.g. bloupunt-data)">'+
+      '<input id="inFile"  value="'+esc(sync.file||'')+'"  placeholder="File name (blank = bloupunt.json)">'+
       '<input id="inToken" value="'+esc(sync.token)+'" placeholder="Fine-grained access token">'+
       '<input id="inPass"  value="'+esc(sync.pass)+'"  placeholder="Encryption passphrase">'+
       '<button class="btnP" onclick="saveSync()">Save</button>'+
