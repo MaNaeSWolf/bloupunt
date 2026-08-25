@@ -1735,6 +1735,41 @@ still to be created, and healthy with it already there. Each produces its own se
 lines, green for what passed and clay for what failed, so the first red line is the thing
 to go and fix. → `sw.js v61`.
 
+### 2026-08-21 (later) — It was a different token all along
+
+Solved, and not by any of the fixes offered. The token on the second phone had been
+pasted from a text file, and copying the string directly off the working phone instead
+made it sync immediately. The token settings screen confirmed the live token was correct
+the whole time: `MaNaeSWolf/bloupunt-data` in Repository access, Contents Read and Write,
+metadata Read.
+
+So the advice — go and fix the token's repository access — was aimed at the wrong object.
+The **reasoning** was right and worth keeping: a 404 rather than a 401 proves the token
+authenticated and simply could not see the repo. What it does not prove is *which* token.
+The text file evidently held an older one, still valid, scoped somewhere else. A merely
+corrupted string would have failed authentication and reported "expired or invalid",
+which was never what the screen said.
+
+Worth remembering: "the credential is wrong" and "the credential is a different one that
+happens to work elsewhere" produce the same 404 and are not distinguishable from inside
+the app. The one honest instruction is to copy from the device that demonstrably works,
+which removes the credential as a variable instead of reasoning about it.
+
+**Token expiry now shows in Test connection.** GitHub returns a fine-grained token's
+expiry in a response header on any authenticated call, so it costs nothing to read: green
+with a day count while there is time, clay inside thirty days or once past. The token in
+use expires 11 July 2027 and will take both phones down on the same day; better to be
+told that today, while everything works, than to rediscover it as a dead sync next
+winter.
+
+Verified against the real header shape and the real date (319 days, reported green), an
+expiry inside thirty days, one already past, an unparseable value shown verbatim rather
+than dropped, and — the case that must not break anything — no header at all, which
+classic tokens and never-expiring tokens will produce: the line simply does not appear.
+Not verified against a live token, since that would mean using someone's real credential;
+the header's presence is GitHub's documented behaviour and its absence degrades to
+silence. → `sw.js v62`.
+
 ---
 
 ## Still to do / open items

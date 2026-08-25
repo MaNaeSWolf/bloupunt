@@ -488,7 +488,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v61';
+const BUILD = 'bloupunt-v62';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -1671,8 +1671,22 @@ window.syncCheck = async () => {
       const r = await fetch(url, { headers: GH_HEADERS(), cache:'no-store' });
       let body = null;
       try { body = await r.json(); } catch(e){}
-      return { status:r.status, body };
-    } catch(e){ return { status:0, body:null }; }
+      return { status:r.status, body,
+               exp: r.headers.get('github-authentication-token-expiration') };
+    } catch(e){ return { status:0, body:null, exp:null }; }
+  };
+  // Absent on classic tokens and on tokens set never to expire, so its absence is not a
+  // fault - the line simply does not appear.
+  const expiryLine = raw => {
+    if (!raw) return null;
+    const d = new Date(raw.replace(' UTC', 'Z').replace(' ', 'T'));
+    if (isNaN(d)) return { ok:true, text:'Token expires: '+raw };
+    const days = Math.round((d - Date.now()) / 86400000);
+    const when = d.toDateString();
+    if (days < 0)  return { ok:false, text:'This token expired on '+when+'. Regenerate it.' };
+    if (days <= 30) return { ok:false, text:'This token expires on '+when+' \u2014 '+days+
+      ' day'+(days===1?'':'s')+' away. Regenerate it before it takes both devices down.' };
+    return { ok:true, text:'Token valid until '+when+' ('+days+' days).' };
   };
 
   const who = await get('https://api.github.com/user');
@@ -1686,6 +1700,8 @@ window.syncCheck = async () => {
     render(); return;
   }
   out.push({ ok:true, text:'Token works'+(who.body && who.body.login ? ' \u2014 signed in as '+who.body.login : '')+'.' });
+  const exp = expiryLine(who.exp);
+  if (exp) out.push(exp);
 
   const repoUrl = 'https://api.github.com/repos/'+sync.owner.trim()+'/'+sync.repo.trim();
   const repo = await get(repoUrl);
