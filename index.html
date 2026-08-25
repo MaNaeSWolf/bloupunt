@@ -329,6 +329,11 @@
   .syncHead{display:flex;justify-content:space-between;align-items:center;gap:10px}
   .syncStat{font-size:13px;color:var(--soft)}
   .divider{height:1px;background:var(--hair);margin:14px 0}
+  .diag{margin-top:12px;border:1px solid var(--faint);border-radius:10px;padding:4px 12px;
+    background:var(--bg)}
+  .diagLine{font-size:12.5px;line-height:1.55;color:var(--soft);margin:8px 0}
+  .diagLine.good{color:var(--sageDeep)}
+  .diagLine.bad{color:var(--clay)}
   .syncTarget{font-size:12px;color:var(--sageDeep);margin-top:10px;
     background:rgba(122,154,126,.10);border:1px solid #CBDCCD;border-radius:9px;padding:8px 10px}
   .syncTitle{font-size:11px;letter-spacing:.18em;color:var(--sageDeep);font-weight:600}
@@ -473,6 +478,7 @@ let syncOpen  = false;
 let booted    = false;
 let notice    = null;       // {ok, msg} — transient banner, used for import feedback
 let noticeTimer = null;
+let syncDiag  = null;      // [{ok, text}] - result of Test connection, panel only
 let pauseOpen = false;      // pause-days chooser open
 let dayEdit   = null;       // { id, key } — the strip day-edit chip target
 let clearHist = null;       // habit id whose "clear all history" is awaiting confirm
@@ -482,7 +488,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v60';
+const BUILD = 'bloupunt-v61';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -1637,10 +1643,81 @@ window.saveSync = () => {
            file:v('inFile') };
   try { localStorage.setItem('bloupunt-sync', JSON.stringify(sync)); } catch(e){}
   syncStatus = sync.token ? 'idle' : 'off';
+  syncDiag = null;
   syncOpen = false;
   if (syncReady()) pullRemote(); else render();
 };
 window.syncNow = () => pullRemote();
+
+/* Test connection. GitHub deliberately answers 404 both for "this repo does not exist"
+   and for "your token cannot see it", so a failed sync cannot say which - and guessing
+   between a repo name, a token scope and a permission is exactly the loop this was
+   costing people. Asking three narrower questions separates them, because each endpoint
+   fails differently:
+     /user                     - does the token authenticate at all, and as whom
+     /repos/{owner}/{repo}     - can this token SEE the repo (404 = not on its list)
+     ...contents/{file}        - does the file exist yet (404 here is normal and fine)
+   Nothing here writes anything. */
+window.syncCheck = async () => {
+  if (!sync.owner || !sync.repo || !sync.token){
+    syncDiag = [{ ok:false, text:'Fill in the username, repo and token first.' }];
+    render(); return;
+  }
+  syncDiag = [{ ok:null, text:'Checking\u2026' }];
+  render();
+  const out = [];
+  const get = async url => {
+    try {
+      const r = await fetch(url, { headers: GH_HEADERS(), cache:'no-store' });
+      let body = null;
+      try { body = await r.json(); } catch(e){}
+      return { status:r.status, body };
+    } catch(e){ return { status:0, body:null }; }
+  };
+
+  const who = await get('https://api.github.com/user');
+  if (who.status === 0){
+    syncDiag = [{ ok:false, text:'No connection \u2014 the request never left this device.' }];
+    render(); return;
+  }
+  if (who.status === 401){
+    syncDiag = [{ ok:false, text:'The token is not valid. It may be mistyped, cut short when '+
+      'pasted, or revoked. A fine-grained token is about 93 characters.' }];
+    render(); return;
+  }
+  out.push({ ok:true, text:'Token works'+(who.body && who.body.login ? ' \u2014 signed in as '+who.body.login : '')+'.' });
+
+  const repoUrl = 'https://api.github.com/repos/'+sync.owner.trim()+'/'+sync.repo.trim();
+  const repo = await get(repoUrl);
+  if (repo.status === 404){
+    out.push({ ok:false, text:'This token cannot see '+sync.owner.trim()+'/'+sync.repo.trim()+
+      '. Either the name is wrong, or the repo is not in the token\u2019s Repository access list. '+
+      'GitHub gives the same answer for both.' });
+    syncDiag = out; render(); return;
+  }
+  if (repo.status !== 200){
+    out.push({ ok:false, text:'Repo check failed ('+repo.status+').' });
+    syncDiag = out; render(); return;
+  }
+  const perms = repo.body && repo.body.permissions;
+  const canPush = perms ? !!perms.push : null;
+  out.push({ ok:true, text:'Repo found: '+(repo.body.full_name || sync.repo.trim())+
+    (repo.body.private ? ' (private)' : ' (public)')+'.' });
+  if (canPush === false)
+    out.push({ ok:false, text:'The token can read this repo but not write to it. It needs '+
+      'Contents: Read and write.' });
+  else if (canPush)
+    out.push({ ok:true, text:'Write access confirmed.' });
+
+  const f = await get(repoUrl + '/contents/' + syncFile());
+  if (f.status === 200) out.push({ ok:true, text:syncFile()+' exists and is readable.' });
+  else if (f.status === 404) out.push({ ok:true, text:syncFile()+' does not exist yet \u2014 the first '+
+    'sync will create it. That is normal for a new person.' });
+  else out.push({ ok:false, text:'Reading '+syncFile()+' returned '+f.status+'.' });
+
+  syncDiag = out;
+  render();
+};
 
 // Tap to sync: flush anything waiting, then pull. Unconfigured, it opens the settings.
 window.syncTap = async () => {
@@ -2998,6 +3075,9 @@ function syncPanel(){
       'what keeps a journal private, so sharing one hands over the diary. Set them once '+
       'per device and leave them. Your passphrase never leaves this device: lose it and '+
       'the backup is unreadable.</p>'+
+    (syncDiag ? '<div class="diag">'+syncDiag.map(d =>
+      '<p class="diagLine'+(d.ok===false?' bad':d.ok===true?' good':'')+'">'+esc(d.text)+'</p>'
+    ).join('')+'</div>' : '')+
     (syncReady() ? '<p class="syncTarget">Writing to <strong>'+esc(sync.owner.trim())+'/'+
       esc(sync.repo.trim())+'</strong> \u00b7 '+esc(syncFile())+'</p>' : '')+
     '<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">'+
@@ -3011,6 +3091,7 @@ function syncPanel(){
         'start or end are dropped. It must match the file it is opening, exactly.</p>'+
       '<button class="btnP" onclick="saveSync()">Save</button>'+
       '<button class="btnG" onclick="syncNow()">Sync now</button>'+
+      '<button class="btnG" onclick="syncCheck()">Test connection</button>'+
       '<button class="btnG" onclick="exportData()">Download a copy</button>'+
       '<button class="btnG" onclick="importData()">Import a copy</button>'+
     '</div>'

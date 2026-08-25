@@ -1704,6 +1704,37 @@ reads as "not found"; right repo list with read-only Contents gives 403 and read
 "cannot write here". Two different messages, and now they mean two different fixes.
 → `sw.js v60`.
 
+### 2026-08-21 (later) — Test connection
+
+Still stuck. The repo name was ruled out the honest way — the working phone uses the same
+capital B, and changing it changed nothing — and both `cora` and `cora.json` behaved the
+same, which they should, since a file name cannot cause a repo-level 404.
+
+At that point the app had said everything it could from one failed request, and the
+remaining possibilities all look identical from where it stands. Better messages had run
+out of road; what was needed was **more evidence**. So: a Test connection button that asks
+three narrower questions, because each endpoint fails in a different place.
+
+- `GET /user` — does the token authenticate at all, and as whom. A 401 here means the
+  token itself is wrong: mistyped, cut short on paste, or revoked. Nothing else needs
+  checking until this passes.
+- `GET /repos/{owner}/{repo}` — can this token **see** the repo. 404 means it is not in
+  the token's Repository access list, or the name is wrong, and GitHub will not say which.
+  The reply also carries `permissions.push`, which is write access stated outright rather
+  than inferred from a failure.
+- `GET .../contents/{file}` — does the file exist yet. 404 here is **good news** for a new
+  person and is reported as such, which matters: it is the one 404 in this whole exercise
+  that means nothing is wrong.
+
+It reads nothing but metadata and writes nothing at all.
+
+The value is in separating token from repo from permission from file, which no single
+sync attempt ever could. Verified against stubbed responses for all five shapes: token
+invalid, token fine but repo invisible, repo visible but read-only, healthy with the file
+still to be created, and healthy with it already there. Each produces its own set of
+lines, green for what passed and clay for what failed, so the first red line is the thing
+to go and fix. → `sw.js v61`.
+
 ---
 
 ## Still to do / open items
