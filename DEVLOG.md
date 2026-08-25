@@ -1350,7 +1350,38 @@ counts were checked against the seed (31 readings + 4 unlogged markers = 35 dots
 **Process note.** Two bugs this week came from running patch scripts through a bash
 heredoc, which collapses backslashes: it put a real NUL byte in `index.html` (v50) and
 here it turned a literal `{backslash}u2014` into an em-dash so an anchor stopped matching.
-Patch scripts now always go through a file. Journal card is next.
+Patch scripts now always go through a file.
+
+### 2026-08-21 (later) — Journal
+
+The second card on the same foundation, and the cheaper one for it: `extra[k]` holds the
+text, `days[k]` holds **1**.
+
+That 1 is not a placeholder standing in for something richer. It is the honest value.
+Writing anything at all is the whole habit, so a journal day is worth exactly what a tick
+is worth, and the length of what you wrote earns nothing. Which is the point — on a bad
+night one sentence keeps the chain, and knowing that in advance is what gets the sentence
+written. Counting words toward the score would quietly turn a floor into a quota, and the
+floor is the part that works.
+
+Word counts still appear, because they are interesting — in the row ("16 words today"),
+on the peek bubble, and as a 30-day total. They just never touch the arithmetic.
+
+**Reading a past entry** was the explicit ask, and the calendar already had the machinery:
+tap a day, and the chip offers `Read · 8 words`, which opens the entry below it, headed
+with its date, editable, saving back to that day. An empty day offers `Write` instead. The
+box renders inline rather than as an overlay, so a phone keyboard shoving the page around
+cannot leave it stranded off screen.
+
+The draft lives outside `data` until you press Save. A half-typed thought is not a logged
+day, Close discards it, and saving whitespace logs nothing at all rather than creating an
+empty entry that would count toward the chain.
+
+Verified: writing from the card logs the day, earns one point and reaches the score;
+a blank save creates nothing; Close discards; opening a past day from the calendar shows
+that day's text and saves edits back to it without touching its neighbours; the bubble
+carries a word count on written days and falls back to date-only on empty ones.
+→ `sw.js v52`.
 
 ---
 

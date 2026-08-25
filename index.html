@@ -234,6 +234,14 @@
   .tNow:disabled,.tNone:disabled{background:var(--bg);border-color:var(--faint);color:#BFB9B0;cursor:default}
   .tNone.on,.tNone.on:disabled{background:var(--sage);border-color:var(--sage);color:#fff}
   .tgraph{margin-top:14px;line-height:0;position:relative}
+  .jWrap{margin-top:14px;padding-top:14px;border-top:1px solid var(--hair)}
+  .jHead{font-size:11px;color:var(--soft);letter-spacing:.03em;margin-bottom:6px}
+  .jBox{width:100%;box-sizing:border-box;background:var(--bg);border:1px solid var(--faint);
+    border-radius:12px;padding:12px 13px;font-family:inherit;font-size:14.5px;
+    line-height:1.6;color:var(--ink);resize:vertical;min-height:110px}
+  .jBox:focus{outline:none;border-color:var(--sage)}
+  .jBox::placeholder{color:#BFB9B0}
+  .jActs{display:flex;gap:10px;margin-top:10px}
   .mRow{display:flex;align-items:center;gap:12px;margin-top:14px}
   .mSlide{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:4px;
     border-radius:2px;background:linear-gradient(90deg,#C9A961,#EDE9E2,#5E8163);
@@ -495,7 +503,7 @@ window.undo = () => {
   for (const id of new Set(Object.keys(before).concat(Object.keys(after))))
     if (before[id] !== after[id]) flashIds[id] = true;
 
-  dayEdit = null; clearHist = null; confirm = null; editing = null;
+  dayEdit = null; clearHist = null; confirm = null; editing = null; jrnl = null;
   save(false);                       // persist and sync, but the undo is not itself an action
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => { flashIds = {}; render(); }, 2000);
@@ -732,6 +740,21 @@ const isCounter = h => h.type === 'plus' || h.type === 'minus' || h.type === 'pl
 const isScore   = h => h.type === 'score';
 const isTime    = h => h.type === 'time';
 const isMood    = h => h.type === 'mood';
+const isJournal = h => h.type === 'journal';
+/* Journal rides the same side channel as mood: `extra[k]` holds the text, `days[k]`
+   holds 1. That 1 is not a placeholder - it is the honest value. Writing anything at
+   all is the whole habit, so a journal day is worth exactly what a tick is worth, and
+   the length of what you wrote earns nothing. Which is the point: on a bad night one
+   sentence keeps the chain, and knowing that is what gets the sentence written. */
+const journalText = (h, k) => { const s = (h.extra||{})[k]; return typeof s === 'string' ? s : ''; };
+const wordCount = s => s ? s.trim().split(/\s+/).filter(Boolean).length : 0;
+function setJournal(h, k, text){
+  h.extra = h.extra || {};
+  const s = String(text == null ? '' : text).trim();
+  if (!s){ delete h.extra[k]; delete h.days[k]; return; }
+  h.extra[k] = s;
+  h.days[k]  = 1;
+}
 /* Mood keeps several readings a day, so it cannot store them in `days` - the whole
    app reads that as one number per day (streaks, points, calendars, stats, sync).
    `days[k]` therefore holds the day's MEAN, which every existing calculation can
@@ -1138,7 +1161,8 @@ window.toggle = (id, k) => {
 };
 
 window.setScreen = s => {
-  grab(); screen = s; editing = null; confirm = null; dayEdit = null; daySel = null; clearHist = null; render();
+  grab(); screen = s; editing = null; confirm = null; dayEdit = null; daySel = null;
+  clearHist = null; jrnl = null; render();
 };
 
 window.toggleExpand = id => { expanded = (expanded === id) ? null : id; dayEdit = null; chipCut = null; render(); };
@@ -1158,6 +1182,26 @@ window.bump = (id, k, delta) => {
   save();
   checkMilestones();
   render();
+};
+
+/* Journal. The draft lives outside `data` until it is saved, so a half-typed thought
+   never becomes a logged day, and closing the box without saving changes nothing. */
+window.openJournal = (id, k) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  jrnl = { id, key: k, text: journalText(h, k) };
+  render();
+  const el = document.getElementById('jBox');
+  if (el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+};
+window.closeJournal = () => { jrnl = null; render(); };
+window.saveJournal = () => {
+  if (!jrnl) return;
+  const h = data.habits.find(x => x.id === jrnl.id);
+  const el = document.getElementById('jBox');
+  if (h) setJournal(h, jrnl.key, el ? el.value : jrnl.text);
+  jrnl = null;
+  save(); checkMilestones(); render();
 };
 
 /* Mood: as many readings a day as you want. Nothing is ever overwritten - a 3 in the
@@ -1250,7 +1294,7 @@ window.openDay  = (id, k) => {
   daySel  = dayEdit ? { id, key:k } : null;     // keep the calendars pointing at one day
   render();
 };
-window.closeDay = () => { dayEdit = null; daySel = null; chipCut = null; render(); };
+window.closeDay = () => { dayEdit = null; daySel = null; chipCut = null; jrnl = null; render(); };
 
 /* Picking a day in a week view is READ-ONLY. It answers "what was that day?" — the
    value appears above the day you tapped, and the SAME day is ringed in every calendar
@@ -1270,6 +1314,7 @@ window.peekDay = (id, k) => {
    kind of rude. */
 let peekTimer = null;
 let moodDraft = {};        // slider positions, per card - not persisted
+let jrnl      = null;      // { id, key, text } - the open journal editor, unsaved
 function armPeek(){
   clearTimeout(peekTimer);
   peekTimer = null;
@@ -1511,6 +1556,10 @@ function peekValue(h, k){
   // Toggles and the score card carry their own answer already - a green block is
   // "done", and the score is printed on the bubble you just tapped. Repeating it adds
   // a word and no information, so these get the date alone.
+  if (isJournal(h)){
+    const w = wordCount(journalText(h, k));
+    return w ? w+' word'+(w===1?'':'s') : '';
+  }
   if (!isTime(h) && !isCounter(h) && !isMood(h)) return '';
   if (!has(h.days, k))
     return (data.paused && data.paused[k]) ? 'paused' : 'not logged';
@@ -1721,6 +1770,13 @@ function dayChip(h){
         'onchange="setDayTime('+h.id+',\''+k+'\',this.value)">'+
       '<button class="chipBtn'+((v!==null&&v>=NONE_MIN)?' on':'')+'" onclick="setDayNone('+h.id+',\''+k+'\')">Didn’t happen</button>'+
       (logged ? '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
+  } else if (isJournal(h)){
+    // The calendar is how you get back to what you wrote - that was the whole ask.
+    const w = wordCount(journalText(h, k));
+    controls =
+      '<button class="chipBtn" onclick="openJournal('+h.id+',\''+k+'\')">'+
+        (w ? 'Read · '+w+' word'+(w===1?'':'s') : 'Write')+'</button>'+
+      (w ? '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
   } else if (isMood(h)){
     const reads = moodReads(h, k);
     if (moodDraft['c'+h.id] === undefined) moodDraft['c'+h.id] = 5;
@@ -1841,6 +1897,79 @@ function timeGraph(h){
    lines meet at that point and it joins the day before and after on both edges - which
    is exactly what "let the one recording join both the high and low" asks for, without
    needing a case for it. */
+/* The journal editor. One box and the two things you can do with it. Rendered inline
+   rather than as an overlay, so a phone keyboard pushing the page around cannot leave
+   it stranded off screen. */
+function journalBox(h){
+  if (!jrnl || jrnl.id !== h.id) return '';
+  const d = parseKey(jrnl.key);
+  const when = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]+' '+d.getDate()+
+    ' '+MONTHS[d.getMonth()];
+  const had = !!journalText(h, jrnl.key);
+  return '<div class="jWrap">'+
+    '<div class="jHead">'+when+(jrnl.key===todayKey()?' · today':'')+'</div>'+
+    '<textarea id="jBox" class="jBox" rows="7" placeholder="Anything at all.">'+
+      esc(jrnl.text)+'</textarea>'+
+    '<div class="jActs">'+
+      '<button class="tNone" onclick="saveJournal()">'+(had?'Save':'Save entry')+'</button>'+
+      '<button class="chipBtn" onclick="closeJournal()">Close</button>'+
+    '</div>'+
+  '</div>';
+}
+
+function journalRow(h, today){
+  const open = expanded === h.id;
+  const text = journalText(h, today);
+  const logged = !!text;
+  const risk = rowRisk(h);
+  const s = statsFor(h);
+  const warn = !logged && s.missed === 1, alarm = !logged && s.missed >= 2;
+  const cls = 'row' + (logged?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') +
+    risk.cls + (flashIds[h.id]?' undone':'');
+
+  const n = wordCount(text);
+  const sub = logged ? n+' word'+(n===1?'':'s')+' today'
+    : s.missed >= 1 ? missNote(h, s)
+    : s.streak > 0 ? s.streak+' day'+(s.streak===1?'':'s')+' written'
+    : 'Nothing written yet';
+
+  let expBlock = '';
+  if (open){
+    const details = [
+      h.cue     ? '<div class="detail"><div class="dk">When and where</div><div class="dv">'+esc(h.cue)+'</div></div>' : '',
+      h.stack   ? '<div class="detail"><div class="dk">Straight after</div><div class="dv">'+esc(h.stack)+'</div></div>' : '',
+      h.minimum ? '<div class="detail"><div class="dk">The floor</div><div class="dv">'+esc(h.minimum)+'</div></div>' : ''
+    ].join('');
+    let n30 = 0, w30 = 0; const c2 = midnight();
+    for (let i=0;i<30;i++){ const k = keyFor(c2); if (has(h.days,k)){ n30++; w30 += wordCount(journalText(h,k)); } c2.setDate(c2.getDate()-1); }
+    const statBlock =
+      '<div class="stats">'+
+        '<div><div class="sl">Streak</div><div class="sv">'+s.streak+'</div></div>'+
+        '<div><div class="sl">Best</div><div class="sv">'+s.best+'</div></div>'+
+        '<div><div class="sl">Last 30</div><div class="sv">'+n30+'/30</div></div>'+
+      '</div>'+
+      '<div class="next">'+w30+' word'+(w30===1?'':'s')+' in 30 days</div>';
+    expBlock = '<div class="exp">'+ details + fullGrid(h) + dayChip(h) + journalBox(h) +
+      statBlock + dayStatsBlock(h) + chainNote(h) + '</div>';
+  }
+
+  // Collapsed, the box opens under the card; expanded, it opens under the calendar so
+  // it sits beside the day you picked.
+  return '<div class="'+cls+'">'+
+    '<div class="top">'+
+      '<button class="tick'+(logged?' on':'')+'" aria-label="Write for '+esc(h.name)+'" '+
+        'onclick="openJournal('+h.id+',\''+today+'\')">'+(logged?TICK_SVG:'')+'</button>'+
+      '<button class="nameBtn" onclick="openJournal('+h.id+',\''+today+'\')">'+
+        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
+        '<div class="streak">'+sub+'</div>'+
+      '</button>'+
+      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
+        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+    '</div>'+
+    riskBlock(risk) + chainStrip(h) + (open ? '' : journalBox(h)) + expBlock +
+  '</div>';
+}
+
 const MGH = 60;                    // taller than the time graph - this one draws a band
 function moodGraph(h){
   const today = todayKey();
@@ -2472,6 +2601,7 @@ function habitRow(h){
   const today = todayKey();
   if (isTime(h)) return timeRow(h, today);
   if (isMood(h)) return moodRow(h, today);
+  if (isJournal(h)) return journalRow(h, today);
   if (isCounter(h)) return counterRow(h, today);
   const done  = !!h.days[today];
   const s     = statsFor(h);
@@ -2544,6 +2674,7 @@ function habitRow(h){
 
 // Values only mean something within a family, so switching families must drop history.
 const famOf = t => t==='score' ? 'score' : t==='time' ? 'time' : t==='mood' ? 'mood'
+  : t==='journal' ? 'journal'
   : (t==='plus'||t==='minus'||t==='plusminus') ? 'counter' : 'toggle';
 
 // Which types can have a direction. Toggles and the score have nothing to rank.
@@ -2557,7 +2688,9 @@ const segBtn = (t, label) =>
     'onclick="setFormType(\''+t+'\')">'+label+'</button>';
 
 function typeHint(t){
-  return t==='mood' ? 'A slider from 1 to 10, logged as often as you like in a day. '+
+  return t==='journal' ? 'A box to write in. Anything at all counts — a sentence keeps '+
+      'the chain as surely as a page does. Past entries open from the calendar.'
+    : t==='mood' ? 'A slider from 1 to 10, logged as often as you like in a day. '+
       'Several readings become a range, drawn as a band so a good morning and a bad '+
       'evening both show.'
     : t==='plus' ? 'Tap + each time (e.g. a glass of water). Cells are tinted by your 7-day average.'
@@ -2568,7 +2701,8 @@ function typeHint(t){
     : 'A simple daily tick. Builds streaks, milestones and the warming background.';
 }
 
-const typeLabel = t => t==='mood' ? 'Mood · 1–10'
+const typeLabel = t => t==='journal' ? 'Journal'
+  : t==='mood' ? 'Mood · 1–10'
   : t==='plus' ? 'Counter · +'
   : t==='minus' ? 'Counter · −'
   : t==='plusminus' ? 'Counter · +/−'
@@ -2583,7 +2717,7 @@ function editorHTML(title){
       '<label class="lbl">How you log it</label>'+
       '<div class="picker">'+
         segBtn('toggle','Tick')+ segBtn('plus','+')+ segBtn('minus','−')+ segBtn('plusminus','+/−')+
-        segBtn('time','Time')+ segBtn('mood','Mood')+
+        segBtn('time','Time')+ segBtn('mood','Mood')+ segBtn('journal','Journal')+
         (allowScore ? segBtn('score','Score') : '')+
       '</div>'+
       '<p class="hint">'+typeHint(form.type)+'</p>'+
