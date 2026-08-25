@@ -1432,6 +1432,56 @@ exercised directly: the mismatch line renders in clay with the right text, match
 versions stay quiet and grey, and the self-heal fires exactly once per session and never
 on a matching pair. → `sw.js v53`.
 
+### 2026-08-21 (later) — Journal becomes somewhere to type
+
+The Journal card had the shape of every other card — a tick, a name, a strip — and that
+was wrong for it. Ticking a box is not writing. The box IS the control now, and the tick
+is gone: a checkbox beside a textarea is a second way of saying the same thing, and one
+that could disagree with it.
+
+Collapsed, the card is: name, word count, **a two-line peek of today's entry**, then the
+week strip. Tap the peek and it grows to a full box with the caret already at the end of
+what you wrote, so a second thought at 10pm lands in the same entry as the first one at
+7am. It stays grown for the rest of the day. No card to open, no Save to find — it
+autosaves 1.2s after you stop typing, and again on the way out.
+
+**The strip is graded now**, which needed `days[k]` to stop being a flat 1 and start
+being the word count. That sounds like it contradicts v52's whole argument, and it does
+not: points come from `chainRun`, which only ever asks *whether* the day is logged. One
+sentence still scores exactly what a page scores. The number in `days` is the day's
+value, not its worth — and having a real value there means the strip can shade off your
+own recent form, the same quintiles as every other card. Few words amber, many green.
+
+Three things worth recording:
+
+- **A silent migration failure.** `normaliseJournals()` was called from the loader, but
+  `wordCount` is a `const` declared hundreds of lines below it — temporal dead zone — and
+  the loader's `try/catch` swallowed the `ReferenceError` whole. Every day stayed at 1
+  and the strip rendered one flat colour, with nothing in the console. Moved to boot,
+  after the script has evaluated, and it also runs after a sync pull and after an import,
+  since a device on an older build will keep pushing flat 1s.
+- **Always-on textareas fight the renderer.** The box is on screen permanently now, so
+  any re-render — a sync landing, a peek timing out, a milestone — arrives mid-sentence.
+  The text is held in `jDraft` and restored with its caret afterwards, which is the same
+  bargain `grab()` already strikes for the editor.
+- **A header that lied for a second.** Autosave deliberately skips `render()` so the
+  caret survives, which left the card reading "5 words today" over a box plainly holding
+  seventeen. It now repaints just that one line in place — the trick `moodSlide` and
+  `setSyncStatus` already use — through a `journalSub()` shared with the full render, so
+  the two can never word it differently.
+
+**Two testing notes**, because both looked like bugs and neither was. Programmatic
+`.focus()` does not fire focus events while the pane is unfocused, and CSS transitions
+are throttled there too — so the box appeared not to expand and the height appeared
+stuck at 46px. Driving it with a real click showed it working exactly as written. Worth
+remembering before "fixing" the next one.
+
+Verified with real clicks and real typing: peek opens to 168px, caret lands at the end
+of the existing text, the card itself never expands, text autosaves without a blur, the
+header tracks the box word for word, a 475px entry scrolls inside a 168px box and back
+to the top, and the strip shows 1 word as `#C9A961` against 43 words as `#5E8163`.
+→ `sw.js v54`.
+
 ---
 
 ## Still to do / open items
