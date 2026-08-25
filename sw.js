@@ -8,12 +8,24 @@
    │ the updated shell. Forget it and phones keep serving the old page. │
    └──────────────────────────────────────────────────────────────────┘ */
 
-const VERSION = 'bloupunt-v52';
+const VERSION = 'bloupunt-v53';
 const CORE = ['./', './index.html'];
 
+/* cache:'reload' is load-bearing, not tidiness. cache.addAll() fetches through the
+   BROWSER's HTTP cache, and GitHub Pages serves index.html with max-age=600. Deploy
+   twice inside ten minutes and the new worker installs, re-fetches the shell, gets the
+   PREVIOUS build back from the HTTP cache, and stores it under the new version's key.
+   The worker then truthfully reports the new version while serving the old page - and
+   because the fetch handler is cache-first, it keeps serving it until the next bump.
+   That is exactly how v52 shipped a Journal card nobody could see. */
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(VERSION).then(c => c.addAll(CORE)).then(() => self.skipWaiting())
+    caches.open(VERSION).then(c => Promise.all(
+      CORE.map(u => fetch(new Request(u, { cache: 'reload' })).then(res => {
+        if (!res || !res.ok) throw new Error('precache failed: ' + u);
+        return c.put(u, res);
+      }))
+    )).then(() => self.skipWaiting())
   );
 });
 

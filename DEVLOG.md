@@ -1383,6 +1383,55 @@ that day's text and saves edits back to it without touching its neighbours; the 
 carries a word count on written days and falls back to date-only on empty ones.
 → `sw.js v52`.
 
+### 2026-08-21 (later) — The Journal card nobody could see
+
+Reported from the phone: Mood works, Journal is missing, on v52. The Journal code was
+definitely deployed — `isJournal` appears four times in the live file, the type button is
+in the markup, and all eight buttons lay out fine at 375px. It was shipped and it was
+invisible.
+
+**`cache.addAll()` fetches through the browser's HTTP cache.** GitHub Pages serves
+`index.html` with `Cache-Control: max-age=600`. So: v51 loads, the browser holds that
+HTML for ten minutes. v52 deploys inside that window. The browser revalidates `sw.js`
+(workers are exempt), sees new bytes, installs the v52 worker — which calls `addAll` and
+gets the **v51 HTML back out of the HTTP cache**, storing it under the v52 cache key.
+
+The worker then reports "v52" perfectly honestly, because the worker really is v52. Only
+the HTML it hands you is v51. And since the fetch handler is cache-first by design, that
+stale shell is served on every launch until the next `VERSION` bump — which, shipped the
+same way, would poison itself again. Mood survived because it went out in v51, one deploy
+earlier, and got cached before the window closed.
+
+The version readout has been lying for exactly as long as two deploys have landed inside
+ten minutes of each other. Worth remembering next time something "shipped" but is not
+there.
+
+Three parts to the fix:
+
+- The worker precaches with `fetch(new Request(u, { cache: 'reload' }))`, which bypasses
+  the HTTP cache. This is load-bearing, not tidiness, and there is now a comment on it
+  saying so.
+- The page carries its **own** `BUILD` id. A worker reporting its version proves which
+  worker is running, never which HTML it served. When the two disagree the build line
+  turns clay and says `worker v53 · page v52 — refreshing`.
+- On a mismatch the page drops every cache and reloads, **once per session**, guarded by
+  `sessionStorage` so a genuine disagreement can never become a reload loop. The first
+  fix stops this arising; this rescues a device already holding a poisoned cache, which
+  cannot heal itself while the fetch handler is cache-first.
+
+The ship script now asserts `BUILD === VERSION` and that `cache: 'reload'` is present, so
+the two can never go out of step unnoticed.
+
+**Honest limitation.** Service workers do not register at all in the test browser used
+here — `getRegistrations()` returns empty on localhost, which is the same environmental
+failure logged back in the early versions. A faithful repro harness was built (a server
+sending `max-age=600` on the shell and `no-cache` on the worker, with old and new worker
+flavours) and could not be driven for that reason. So the precache change is verified by
+the mechanism and its confirmed preconditions rather than by a live repro. What WAS
+exercised directly: the mismatch line renders in clay with the right text, matching
+versions stay quiet and grey, and the self-heal fires exactly once per session and never
+on a matching pair. → `sw.js v53`.
+
 ---
 
 ## Still to do / open items

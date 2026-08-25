@@ -309,6 +309,7 @@
   .btnRed{background:var(--clay);color:#fff;padding:8px 16px;font-size:13px;font-weight:500}
   .cap{font-size:12px;color:var(--soft);text-align:center;margin-top:6px;line-height:1.6}
   .build{font-size:10px;color:var(--soft);opacity:.5;text-align:center;margin-top:20px;letter-spacing:.05em}
+  .build.stale{color:var(--clay);opacity:1}
 
   .banner{border-radius:12px;padding:10px 14px;font-size:13px;margin-bottom:16px}
   .banner.err{background:var(--clayBg);border:1px solid var(--clay);color:var(--clay)}
@@ -465,6 +466,11 @@ let dayEdit   = null;       // { id, key } — the strip day-edit chip target
 let clearHist = null;       // habit id whose "clear all history" is awaiting confirm
 let chipCut   = null;       // day key whose "clear to here" is awaiting confirm
 let daySel    = null;       // { id, key } — a day picked in a week view, read-only
+/* The page's OWN build id, bumped with the worker's VERSION. The worker reporting its
+   version proves only which worker is running - not which HTML it handed you. When the
+   two disagree, the shell in the cache is stale, and the page can say so instead of
+   quietly showing a build the user does not have. */
+const BUILD = 'bloupunt-v53';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -2966,7 +2972,10 @@ function render(){
     (notice
       ? '<div class="banner '+(notice.ok?'ok':'err')+'">'+esc(notice.msg)+'</div>' : '')+
     body +
-    (swVersion ? '<p class="build">'+esc(swVersion)+'</p>' : '')+
+    (swVersion
+      ? '<p class="build'+(swVersion !== BUILD ? ' stale' : '')+'">'+esc(swVersion)+
+        (swVersion !== BUILD ? ' \u00b7 page ' + esc(BUILD) + ' \u2014 refreshing' : '')+'</p>'
+      : '')+
     (flash ? '<div class="breath" aria-hidden="true"></div>' : '')+
     celebrationHTML();
 
@@ -3025,7 +3034,20 @@ if ('serviceWorker' in navigator){
     location.reload();
   });
   navigator.serviceWorker.addEventListener('message', e => {
-    if (e.data && e.data.type === 'version'){ swVersion = e.data.version; render(); }
+    if (!e.data || e.data.type !== 'version') return;
+    swVersion = e.data.version;
+    render();
+    /* A mismatch means the cached shell is not this build. Drop the caches and reload,
+       once per session so a genuine disagreement can never become a reload loop. The
+       fix above stops this happening; this is what rescues a device already holding a
+       poisoned cache, which cannot heal itself while the fetch handler is cache-first. */
+    if (swVersion && swVersion !== BUILD && !sessionStorage.getItem('bloupunt-reheal')){
+      sessionStorage.setItem('bloupunt-reheal', '1');
+      caches.keys()
+        .then(keys => Promise.all(keys.map(k => caches.delete(k))))
+        .then(() => location.reload())
+        .catch(() => {});
+    }
   });
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js').then(reg => {
