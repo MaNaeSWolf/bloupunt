@@ -488,7 +488,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v62';
+const BUILD = 'bloupunt-v63';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -3051,12 +3051,14 @@ function editorHTML(title){
   return '<div class="editor">'+
     '<h3>'+title+'</h3>'+
     '<div class="fld">'+
-      '<label class="lbl" for="fName">The habit</label>'+
-      '<input id="fName" value="'+esc(form.name)+'" placeholder="Read" autofocus>'+
+      '<label class="lbl" for="fName">Name</label>'+
+      '<input id="fName" value="'+esc(form.name)+'" placeholder="'+
+        (form.type==='journal' ? 'Journal' : form.type==='mood' ? 'Mood' : 'Read')+
+        '" autofocus>'+
     '</div>'+
     seg +
     '<div class="fld">'+
-      '<label class="lbl" for="fCue">When and where</label>'+
+      '<label class="lbl" for="fCue">When and where <span class="opt">\u00b7 optional</span></label>'+
       '<input id="fCue" value="'+esc(form.cue)+'" placeholder="At 9pm, in the bedroom">'+
       '<p class="hint">A specific time and place. The single thing most likely to make it stick.</p>'+
     '</div>'+
@@ -3066,7 +3068,7 @@ function editorHTML(title){
       '<p class="hint">Anchor it to something you already do without thinking.</p>'+
     '</div>'+
     '<div class="fld">'+
-      '<label class="lbl" for="fMin">The floor</label>'+
+      '<label class="lbl" for="fMin">The floor <span class="opt">\u00b7 optional</span></label>'+
       '<input id="fMin" value="'+esc(form.minimum)+'" placeholder="One page">'+
       '<p class="hint">The smallest version that still counts. Offered back after two missed days.</p>'+
     '</div>'+
@@ -3232,7 +3234,7 @@ function render(){
     }
   } else {
     const cards = data.habits.map(h => {
-      if (editing === h.id) return editorHTML('Edit habit');
+      if (editing === h.id) return editorHTML('Edit card');
       if (confirm === h.id) return '<div class="mCard danger" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
         '<span style="flex:1;font-size:13px;color:var(--soft);min-width:150px">Remove \u201c'+esc(h.name)+'\u201d and its history?</span>'+
         '<button class="btnRed" onclick="doRemove('+h.id+')">Remove</button>'+
@@ -3262,7 +3264,7 @@ function render(){
     }).join('');
 
     const adder = editing === 'new'
-      ? editorHTML('New habit')
+      ? editorHTML('New card')
       : '<button class="btnDash" onclick="openNew()">+ Add a card</button>';
 
     const cap = (data.habits.length >= 3 && !editing)

@@ -1770,6 +1770,33 @@ Not verified against a live token, since that would mean using someone's real cr
 the header's presence is GitHub's documented behaviour and its absence degrades to
 silence. → `sw.js v62`.
 
+### 2026-08-21 (later) — The form was asking for things it never needed
+
+Noticed while setting up the two new cards: "When and where" reads as required. It never
+was. `commit()` has only ever checked one thing — `if (!name) return;` — and every card
+already renders its detail blocks conditionally, so an empty cue has always produced a
+clean card. The form was simply lying about what it wanted, because "Straight after" was
+the only one of the three carrying a `· optional` marker.
+
+"The floor" had exactly the same problem and got the same treatment. Marking one and not
+the other would have left the same false impression one field further down.
+
+This matters more for the new card types than it did for the old ones. A tick habit
+genuinely benefits from a time and a place — that hint is good advice and stays. But a
+mood slider is a complete thing on its own, and so is a journal box; being made to invent
+a cue for one is being made to fill in a form for no reason. Nothing in the saving code
+changed at all.
+
+**Also finished a rename I left half-done.** When "Add a habit" became "Add a card" in
+v51, the editor it opens kept saying "New habit", "Edit habit" and "The habit". A mood
+slider is not a habit you perform. Now "New card", "Edit card" and simply "Name" — with a
+placeholder that follows the type, so choosing Journal suggests "Journal" rather than
+"Read".
+
+Verified by building a Journal and a Mood with nothing but a name: both save, both appear,
+both expand with their calendar and stats and **zero empty detail blocks** — no orphaned
+labels, no gaps where a cue would have been. → `sw.js v63`.
+
 ---
 
 ## Still to do / open items
