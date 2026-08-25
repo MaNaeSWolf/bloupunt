@@ -482,7 +482,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v58';
+const BUILD = 'bloupunt-v59';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -652,14 +652,34 @@ function dataSig(o){
 }
 
 const syncReady = () => !!(sync.owner && sync.repo && sync.token && sync.pass);
+/* GitHub answers the same 404 for "this file is not there yet" and "this repo is not
+   there at all", so ghGet cannot tell them apart - it treats 404 as a new file, which
+   is right. The PUT is where a bad repo name finally shows itself. */
+function syncFail(e){
+  if (!e) return 'error';
+  if (e.status === 401) return 'expired';
+  if (e.status === 403) return 'noaccess';
+  if (e.status === 404) return 'norepo';
+  if (e.name === 'TypeError') return 'offline';   // fetch never reached the network
+  return 'error';
+}
 
 function syncLabel(){
+  /* "Sync: failed - check details / connection" covered a wrong passphrase, a wrong repo
+     name, a token without write permission and a dead network, all with one sentence that
+     names none of them. Every one of these is distinguishable at the point it happens, and
+     each has a different fix, so each gets its own line. */
   const s = {
     off:'Sync: off',
     idle:'Sync: ready',
     syncing:'Sync: syncing\u2026',
     ok:'Sync: up to date \u2713',
     expired:'Sync: token expired or invalid \u2014 update it under Manage sync',
+    badpass:'Sync: the passphrase does not open this file \u2014 check the passphrase, and check '+
+            'the file name is yours',
+    noaccess:'Sync: the token cannot write here \u2014 it needs Contents: Read and write on this repo',
+    norepo:'Sync: repo not found \u2014 check the username and repo name',
+    offline:'Sync: no connection',
     error:'Sync: failed \u2014 check details / connection'
   }[syncStatus];
   /* Name the file here, not only inside the settings panel. When two people share one
@@ -671,7 +691,7 @@ function syncLabel(){
 }
 // One glyph carries the whole sync state: red failed, green synced, ink idle.
 function syncTone(){
-  if (syncStatus === 'error' || syncStatus === 'expired') return 'bad';
+  if (['error','expired','badpass','noaccess','norepo','offline'].indexOf(syncStatus) !== -1) return 'bad';
   if (!syncReady()) return 'off';
   if (syncStatus === 'syncing') return 'busy';
   return (syncStatus === 'ok' && !pendingPush) ? 'good' : 'idle';
@@ -714,7 +734,7 @@ async function pushRemote(){
     pendingPush = false;
     setSyncStatus('ok');
   } catch(e) {
-    setSyncStatus(e && e.status === 401 ? 'expired' : 'error');
+    setSyncStatus(syncFail(e));
   }
 }
 
@@ -747,7 +767,13 @@ async function pullRemote(){
     const cur = await ghGet();
     if (!cur.body) { await pushRemote(); return; }        // first device seeds the repo
     if (cur.body.pkg && cur.body.updatedAt !== (data.updatedAt||0)) {
-      const obj = await decryptData(cur.body.pkg, sync.pass);
+      /* Isolated on purpose: a decrypt failure means the passphrase does not match the
+         file this device is pointed at, which is a different problem from a network or
+         token fault and has a different fix. Bailing here also guarantees no merge can
+         follow - the wrong file must never be union-merged into this one. */
+      let obj;
+      try { obj = await decryptData(cur.body.pkg, sync.pass); }
+      catch(err){ setSyncStatus('badpass'); render(); return; }
       const localBefore = dataSig(data);
       const remoteSig   = dataSig(obj);
       unionInto(obj);                                     // union - never drops a logged day
@@ -763,7 +789,7 @@ async function pullRemote(){
     }
     setSyncStatus('ok');
   } catch(e) {
-    setSyncStatus(e && e.status === 401 ? 'expired' : 'error');
+    setSyncStatus(syncFail(e));
     render();
   }
 }
@@ -2979,6 +3005,9 @@ function syncPanel(){
       '<input id="inFile"  value="'+esc(sync.file||'')+'"  placeholder="File name (blank = bloupunt.json)">'+
       '<input id="inToken" value="'+esc(sync.token)+'" placeholder="Fine-grained access token">'+
       '<input id="inPass"  value="'+esc(sync.pass)+'"  placeholder="Encryption passphrase">'+
+      '<p class="hint">Any characters, any length. Capitals and spaces inside it count, '+
+        'so \u201cMy Dog Rex\u201d and \u201cmydogrex\u201d are different passphrases. Spaces at the very '+
+        'start or end are dropped. It must match the file it is opening, exactly.</p>'+
       '<button class="btnP" onclick="saveSync()">Save</button>'+
       '<button class="btnG" onclick="syncNow()">Sync now</button>'+
       '<button class="btnG" onclick="exportData()">Download a copy</button>'+

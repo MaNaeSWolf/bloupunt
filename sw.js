@@ -8,7 +8,7 @@
    │ the updated shell. Forget it and phones keep serving the old page. │
    └──────────────────────────────────────────────────────────────────┘ */
 
-const VERSION = 'bloupunt-v58';
+const VERSION = 'bloupunt-v59';
 const CORE = ['./', './index.html'];
 
 /* cache:'reload' is load-bearing, not tidiness. cache.addAll() fetches through the

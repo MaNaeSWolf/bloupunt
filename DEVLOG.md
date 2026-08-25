@@ -1649,6 +1649,38 @@ inside the settings panel. When the whole separation rests on one field, a phone
 say which file it writes to without anyone having to go looking for it.
 → `sw.js v58`.
 
+### 2026-08-21 (later) — "Not syncing" should never be the whole answer
+
+Cora's phone would not sync, and the app's contribution was
+**"Sync: failed — check details / connection"**. That one sentence stood for a wrong
+passphrase, a wrong repo name, a token without write permission, and a dead network. Four
+problems with four different fixes, told apart perfectly well inside the code and then
+flattened into a single line that names none of them. Only a 401 was ever distinguished.
+
+Every one of them is now its own message:
+
+- **badpass** — "the passphrase does not open this file". Isolated around the decrypt
+  call, which is also what guarantees no merge can follow: a file this device cannot open
+  must never be union-merged into the one it has.
+- **noaccess** (403) — "the token cannot write here — it needs Contents: Read and write".
+- **norepo** (404 on the PUT) — "repo not found". GitHub answers 404 identically for "this
+  file is not there yet" and "this repo does not exist", and `ghGet` has to read that as a
+  new file, because seeding one is a real case. The PUT is where a bad repo name finally
+  admits what it is.
+- **offline** — a `TypeError` from fetch means the request never left the device.
+
+**The passphrase rules are now stated where the passphrase is typed**, since that was the
+actual question: any characters, any length; capitals and internal spaces count, so
+"My Dog Rex" and "mydogrex" are different keys; leading and trailing spaces are dropped by
+`saveSync`'s trim. PBKDF2 runs over the UTF-8 bytes, so nothing is off limits — the only
+rule that matters is that it matches the file it is opening, exactly.
+
+Verified against the shapes GitHub and fetch actually produce: 401/403/404/TypeError each
+map to their own status, all seven messages are distinct, and every failure still reads as
+a red S. Then end to end with the network stubbed and the real `pullRemote`: a file
+written with one passphrase and pulled with another gives `badpass` and leaves the local
+habits **untouched**, while the correct passphrase merges as normal. → `sw.js v59`.
+
 ---
 
 ## Still to do / open items
