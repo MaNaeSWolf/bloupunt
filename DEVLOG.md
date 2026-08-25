@@ -1616,6 +1616,39 @@ sitting on her device. She is better off owning her own repo under her own accou
 her own token and her own passphrase. The app is indifferent to which; the security is
 not.
 
+### 2026-08-21 (later) — One repo, one token, two files
+
+Decision taken: no second GitHub account. Cora's phone uses this account's repo and
+token, and the two people are kept apart by **file name alone** — `bloupunt.json` and
+`cora.json` side by side in `bloupunt-data`. Privacy between them is not the concern
+here; they are married and can simply ask each other.
+
+v57 already did the work. Confirmed the creation path rather than assuming it: `ghGet`
+returns cleanly on a 404, `pullRemote` seeds through `pushRemote`, and `pushRemote` omits
+the sha when there is none — which is a create. Her first sync makes the file. Nothing
+needed writing.
+
+**What did need establishing is what happens when it is set up wrong**, because the
+likely mistake is obvious: her phone gets configured by copying the working settings
+across and the file name never gets changed. Tested both ways, and the answer turns on
+the passphrase:
+
+- **Different passphrase** — pointing at the wrong file throws `OperationError` on
+  decrypt. `pullRemote` catches it, shows a failed sync, and **no merge happens**. The
+  mistake is loud and harmless.
+- **Same passphrase** — the wrong file decrypts perfectly and the two habit sets union
+  together. Silent, and tedious to unpick afterwards.
+
+So a separate passphrase is worth having even where privacy is not the point: it is the
+thing that turns a silent data merge into an error message. Worth recording, because the
+reasoning is not the one you would expect — it is a safety catch, not a lock.
+
+The one change here: `syncLabel()` now names the file, so a device reads
+"Sync: up to date ✓ · cora.json" in the Manage header and on the S button, not only
+inside the settings panel. When the whole separation rests on one field, a phone should
+say which file it writes to without anyone having to go looking for it.
+→ `sw.js v58`.
+
 ---
 
 ## Still to do / open items

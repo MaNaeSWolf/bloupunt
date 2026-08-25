@@ -482,7 +482,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v57';
+const BUILD = 'bloupunt-v58';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -654,7 +654,7 @@ function dataSig(o){
 const syncReady = () => !!(sync.owner && sync.repo && sync.token && sync.pass);
 
 function syncLabel(){
-  return {
+  const s = {
     off:'Sync: off',
     idle:'Sync: ready',
     syncing:'Sync: syncing\u2026',
@@ -662,6 +662,12 @@ function syncLabel(){
     expired:'Sync: token expired or invalid \u2014 update it under Manage sync',
     error:'Sync: failed \u2014 check details / connection'
   }[syncStatus];
+  /* Name the file here, not only inside the settings panel. When two people share one
+     repo and one token, the whole separation rests on this one value - and the way it
+     goes wrong is a phone set up by copying the other's settings and never changing it.
+     That failure is silent: the habits simply union together. A device should say which
+     file it writes to without anyone having to go looking. */
+  return syncReady() ? s + ' \u00b7 ' + syncFile() : s;
 }
 // One glyph carries the whole sync state: red failed, green synced, ink idle.
 function syncTone(){
