@@ -1482,6 +1482,50 @@ header tracks the box word for word, a 475px entry scrolls inside a 168px box an
 to the top, and the strip shows 1 word as `#C9A961` against 43 words as `#5E8163`.
 → `sw.js v54`.
 
+### 2026-08-21 (later) — A journal that cannot lose what you wrote
+
+Two bugs reported from the phone, and the second one matters far more than the layout
+work around it.
+
+**Text vanished.** Typed words were held in a variable and written out on a 1.2s timer or
+on blur. Background a PWA on Android and the page is torn down with neither happening —
+the writing was simply gone. That is the one failure a journal cannot have. Every
+keystroke now goes straight into `data` and into localStorage through a new `persist()`
+that does nothing else: no undo entry, no sync timer, no render. The debounce still
+exists, but it only defers the expensive half — the undo snapshot and the sync push. The
+text itself is never later than the keystroke. `flushJournal()` also runs on
+`visibilitychange` and `pagehide`, so a pending push leaves before the page can die.
+
+**The box would not collapse.** It was pinned open by `jOpenDay`, a flag set on first
+touch and never cleared — v54 was asked to keep it open "for the whole day" and did
+exactly that. The rule is better now and simpler: **the box is as big as the card**.
+Collapsed it is two lines; typing opens the card, which opens the box. `jOpenDay` is
+gone entirely.
+
+**And one bug I introduced while fixing those.** Opening the card on the first keystroke
+calls `render()`, which replaces `innerHTML` — removing the focused textarea, and the
+browser fires `blur` on the way out. `jLeave` treated that as a person leaving the field:
+it nulled the focus state and re-rendered directly on top of the restore, losing the
+caret on the very keystroke that opened the card. A detached node is not connected, a
+real blur always is, so `if (!el.isConnected) return;` separates them. Worth remembering
+— any always-on input in a full-innerHTML renderer has this hazard.
+
+Layout, as asked: the week strip moved **above** the box, and the collapsed peek is two
+lines rather than seven. The peek is scrolled to its end, not its start — showing the
+first two lines of Tuesday's entry tells you what you were thinking; showing the last two
+tells you where to carry on from.
+
+Verified with real clicks and real typing: collapsed is 66px — exactly two lines — with
+the strip above it and the tail showing; tapping focuses with the caret at the end and
+does NOT resize (tapping to read should not rearrange the page); the first keystroke
+opens the card to 168px with the text and caret intact; collapsing the card collapses the
+box again. And the one that counts: typed, navigated away, killed the page with no blur
+and no timer — the text was already in localStorage and came back whole.
+
+Two harness notes, again: a real click is needed, since programmatic `.focus()` fires no
+focus events in an unfocused pane, and the trailing blur after a synthetic `type` is the
+harness releasing focus, not the app. → `sw.js v55`.
+
 ---
 
 ## Still to do / open items

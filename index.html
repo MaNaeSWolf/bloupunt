@@ -239,7 +239,7 @@
   .jInline{display:block;width:100%;box-sizing:border-box;margin-top:12px;
     background:var(--bg);border:1px solid var(--faint);border-radius:12px;
     padding:10px 12px;font-family:inherit;font-size:14px;line-height:1.55;
-    color:var(--ink);resize:none;overflow-y:auto;height:46px;
+    color:var(--ink);resize:none;overflow-y:auto;height:66px;
     transition:height 180ms ease,border-color 180ms ease}
   .jInline.open{height:168px;resize:vertical}
   .jInline:focus{outline:none;border-color:var(--sage);background:var(--card)}
@@ -480,7 +480,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v54';
+const BUILD = 'bloupunt-v55';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -493,6 +493,14 @@ let flashTimer = null;
 const UNDO_MAX = 10;
 let undoStack = [];
 let prevSnap  = '';
+
+/* localStorage only: no undo entry, no sync timer, no render. Every keystroke in a
+   journal goes through here, which is the difference between text that survives the
+   phone killing a backgrounded tab and text that does not. */
+function persist(){
+  data.updatedAt = Date.now();
+  try { localStorage.setItem('bloupunt-data', JSON.stringify(data)); } catch(e){}
+}
 
 const save = (undoable = true) => {
   if (undoable && prevSnap){
@@ -747,8 +755,10 @@ function autoPull(){
   lastPull = now;
   pullRemote();
 }
-document.addEventListener('visibilitychange', () => { if (document.hidden) flushPush(); else autoPull(); });
-window.addEventListener('pagehide', flushPush);   // fires on tab close / app background
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden){ flushJournal(); flushPush(); } else autoPull();
+});
+window.addEventListener('pagehide', () => { flushJournal(); flushPush(); });
 window.addEventListener('focus', autoPull);
 window.addEventListener('pageshow', autoPull);    // bfcache restore
 
@@ -1230,43 +1240,60 @@ window.closeJournal = () => { jrnl = null; render(); };
    Save to find. It expands on first touch and stays expanded for the rest of the day,
    so a second thought at 10pm lands in the same box as the first one at 7am, with the
    caret already at the end of what you wrote. */
+/* Touching the box does not resize it - typing does, by opening the card. Tapping to
+   read should not rearrange the page under you. The caret still goes to the end so the
+   next keystroke continues where you left off. */
 window.jTouch = el => {
-  const id = el.dataset.h;
-  const first = !el.classList.contains('open');
-  el.classList.add('open');
-  jOpenDay[id] = todayKey();
-  // Caret to the end only on the FIRST touch. After that a tap in the middle of a
-  // sentence means what it usually means.
-  if (first){ const n = el.value.length; try { el.setSelectionRange(n, n); } catch(e){}
-              el.scrollTop = el.scrollHeight; }
-  jFocus = id;
+  if (!el.classList.contains('open')){
+    const n = el.value.length;
+    try { el.setSelectionRange(n, n); } catch(e){}
+    el.scrollTop = el.scrollHeight;
+  }
+  jFocus = el.dataset.h;
 };
+/* Every keystroke lands in `data` and in localStorage immediately. The previous version
+   held the text in a variable and wrote it out on a 1.2s timer or on blur - and if the
+   phone tore the page down before either (backgrounding a PWA does exactly that), the
+   writing was simply gone. A journal that can lose what you wrote is worse than no
+   journal, so the debounce now only defers the EXPENSIVE half: the undo snapshot and the
+   sync push. The text itself is never later than the keystroke. */
 window.jType = el => {
+  const id = +el.dataset.h;
   jDraft[el.dataset.h] = el.value;
   jFocus = el.dataset.h; jSel = el.selectionStart;
-  // Persist while you type, but never re-render: that would eat the caret. The screen
-  // catches up on blur.
+
+  const h = data.habits.find(x => x.id === id);
+  if (h){
+    setJournal(h, todayKey(), el.value);
+    persist();
+    const sl = document.getElementById('jSub' + id);
+    if (sl) sl.textContent = journalSub(h, todayKey(), statsFor(h));
+  }
   clearTimeout(jSaveTimer);
-  jSaveTimer = setTimeout(() => commitJournal(+el.dataset.h, false), 1200);
+  jSaveTimer = setTimeout(() => { jSaveTimer = null; save(false); }, 1200);
+
+  // Writing is a commitment to the day, so the card opens up around it. Only once -
+  // re-rendering on every keystroke would be absurd.
+  if (expanded !== id){ expanded = id; render(); }
 };
 window.jLeave = el => {
+  /* A render replaces innerHTML, which removes the focused textarea - and the browser
+     fires blur on the way out. That is a tear-down, not a person leaving the field, and
+     treating it as one nulled the focus state and re-rendered directly on top of the
+     restore, so the caret was lost on the first keystroke that opened the card. A
+     detached node is no longer connected; a real blur always is. */
+  if (!el.isConnected) return;
   clearTimeout(jSaveTimer); jSaveTimer = null;
   jFocus = null;
-  commitJournal(+el.dataset.h, true);
+  save(false);
+  render();
 };
-// Writing nothing logs nothing - a stray tap on the box must not create a day.
-function commitJournal(id, repaint){
-  const h = data.habits.find(x => x.id === id);
-  if (!h) return;
-  const k = todayKey(), text = jDraft[id] != null ? jDraft[id] : '';
-  if (text.trim() === journalText(h, k)) { if (repaint) render(); return; }
-  setJournal(h, k, text);
-  save(); checkMilestones();
-  if (repaint){ render(); return; }
-  // Mid-typing: repaint only the word count, so the header cannot sit there claiming
-  // five words over a box that plainly holds seventeen.
-  const el = document.getElementById('jSub' + id);
-  if (el) el.textContent = journalSub(h, k, statsFor(h));
+// Belt and braces: if the app is backgrounded with a sync push still pending, get it
+// out before the page can be torn down. The text is already in localStorage by then.
+function flushJournal(){
+  if (!jSaveTimer) return;
+  clearTimeout(jSaveTimer); jSaveTimer = null;
+  save(false);
 }
 window.saveJournal = () => {
   if (!jrnl) return;
@@ -1389,7 +1416,6 @@ let peekTimer = null;
 let moodDraft = {};        // slider positions, per card - not persisted
 let jrnl      = null;      // { id, key, text } - the PAST-day editor, opened from the calendar
 let jDraft    = {};        // habit id -> today's text as typed, survives a re-render
-let jOpenDay  = {};        // habit id -> the day its box was expanded on
 let jFocus    = null;      // habit id whose box had focus, to restore after a render
 let jSel      = 0;         // and where the caret was
 let jSaveTimer = null;
@@ -1616,6 +1642,10 @@ function grabJournals(){
   }
 }
 function restoreJournal(){
+  // A two-line peek showing the first two lines of a long entry tells you what you were
+  // thinking on Tuesday. Showing the LAST two tells you where to carry on from.
+  for (const el of document.querySelectorAll('.jInline:not(.open)'))
+    el.scrollTop = el.scrollHeight;
   if (jFocus === null) return;
   const el = document.querySelector('.jInline[data-h="'+jFocus+'"]');
   if (!el) { jFocus = null; return; }
@@ -2059,7 +2089,6 @@ function journalRow(h, today){
      The box sits above the week strip so the first thing under the name is somewhere to
      type, already showing what today holds. */
   const draft = jDraft[h.id] != null ? jDraft[h.id] : text;
-  const wide  = jOpenDay[h.id] === today;
   return '<div class="'+cls+'">'+
     '<div class="top">'+
       '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
@@ -2069,10 +2098,11 @@ function journalRow(h, today){
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
-    '<textarea class="jInline'+(wide?' open':'')+'" data-h="'+h.id+'" '+
+    riskBlock(risk) + chainStrip(h) +
+    '<textarea class="jInline'+(open?' open':'')+'" data-h="'+h.id+'" '+
       'aria-label="Today\u2019s entry for '+esc(h.name)+'" placeholder="Write something\u2026" '+
       'onfocus="jTouch(this)" oninput="jType(this)" onblur="jLeave(this)">'+esc(draft)+'</textarea>'+
-    riskBlock(risk) + chainStrip(h) + expBlock +
+    expBlock +
   '</div>';
 }
 
