@@ -1304,6 +1304,54 @@ expanded plus the manage screen, checking for glued tokens, doubled separators a
 runaway whitespace. The only hits were `8pm` (a real cue value) crossing a line break.
 `.insH:first-child` was checked too and genuinely matches. → `sw.js v50`.
 
+### 2026-08-21 (later) — Mood, and a second value per day
+
+"Add a habit" is now "Add a card", which is what they have been for a while.
+
+**The design problem.** Every calculation in Bloupunt reads `days[k]` as one number per
+day — streaks, the tier ladder, the day score, both calendars, the weekday stats, the
+sync merge. Mood wants several readings a day. Rewriting `days` to hold arrays would
+have touched every one of those and put the whole app's arithmetic at risk for one card.
+
+So `days[k]` keeps holding a number — the day's **mean** — and a parallel `extra[k]`
+holds the readings themselves. Everything existing works untouched: a mood day is a
+logged day, it earns the same point, it shades the calendar, it counts toward the score.
+One side channel, handled everywhere `days` is handled — merged by sync, wiped on a
+family change, cleared by "Clear" and "Clear to here". `setMoodDay` writes both together
+so the mean can never drift from the readings behind it.
+
+**The graph draws two lines, not one.** The low of each day joins the low of the next,
+the high joins the high. A day that ran 3 in the morning and 9 at night reads as a band
+rather than an average that happened to nobody. A day with a single reading has
+`lo === hi`, so the two lines meet at that point and it connects to both edges of its
+neighbours — which is exactly the "one recording joins both the high and the low" rule,
+falling out of the geometry instead of needing a case of its own. Paused days bridge a
+run, as everywhere else.
+
+Mood also gets its own graph height (60px against the time card's 46). An envelope needs
+more room than a line; at 46px the two edges sat on top of each other. The joining lines
+are `--soft` at 42% rather than `--faint`, for the same reason — one faint line reads,
+two tracing an outline do not.
+
+**Banding is ABSOLUTE here, and only here.** Everywhere else a value means something
+only next to your own recent form, so the bands are quintiles. A 3 out of 10 is a bad day
+whether or not the week around it was worse, and re-basing every week would quietly
+repaint a rough patch green. Still the house amber-to-green ramp: there is no true red
+anywhere in Bloupunt, because a day you recorded is not a failure however it went.
+
+Verified end to end: created through the real editor; three readings logged from the
+slider give `3–9 today · 3 readings`, a mean of 6.3, one chain point and a score
+contribution; the bubble shows the range rather than the mean; the chip adds, undoes one
+and clears a past day with the mean staying in step; undo restores the readings, so
+`extra` survives the snapshot; weekday stats treat it as a scored card. Dot and line
+counts were checked against the seed (31 readings + 4 unlogged markers = 35 dots;
+13 joined pairs × 2 edges = 26 lines). → `sw.js v51`.
+
+**Process note.** Two bugs this week came from running patch scripts through a bash
+heredoc, which collapses backslashes: it put a real NUL byte in `index.html` (v50) and
+here it turned a literal `{backslash}u2014` into an em-dash so an anchor stopped matching.
+Patch scripts now always go through a file. Journal card is next.
+
 ---
 
 ## Still to do / open items

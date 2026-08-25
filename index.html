@@ -138,6 +138,7 @@
   .chipNav{background:var(--bg);border:1px solid var(--faint);color:var(--ink);
     border-radius:8px;padding:3px 10px;font-size:15px;line-height:1.1}
   .chipNav:disabled{opacity:.35;cursor:default}
+  .chipK{color:var(--soft);font-size:11px;margin-right:5px}
   .ord{display:flex;flex-direction:column;gap:3px;flex-shrink:0;margin-right:2px}
   .ordBtn{width:26px;height:20px;border-radius:6px;border:1px solid var(--faint);
     background:var(--bg);color:var(--soft);font-size:12px;line-height:1;display:grid;place-items:center;padding:0}
@@ -233,6 +234,21 @@
   .tNow:disabled,.tNone:disabled{background:var(--bg);border-color:var(--faint);color:#BFB9B0;cursor:default}
   .tNone.on,.tNone.on:disabled{background:var(--sage);border-color:var(--sage);color:#fff}
   .tgraph{margin-top:14px;line-height:0;position:relative}
+  .mRow{display:flex;align-items:center;gap:12px;margin-top:14px}
+  .mSlide{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:4px;
+    border-radius:2px;background:linear-gradient(90deg,#C9A961,#EDE9E2,#5E8163);
+    outline:none;padding:0}
+  .mSlide::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;
+    border-radius:50%;background:var(--card);border:2px solid var(--sageDeep);
+    box-shadow:0 1px 4px rgba(61,59,55,.22);cursor:pointer}
+  .mSlide::-moz-range-thumb{width:20px;height:20px;border-radius:50%;
+    background:var(--card);border:2px solid var(--sageDeep);cursor:pointer}
+  .mVal{flex:0 0 auto;width:20px;text-align:center;font-family:'Fraunces',Georgia,serif;
+    font-size:18px;color:var(--sageDeep);font-variant-numeric:tabular-nums}
+  .mLog{flex:0 0 auto}
+  /* In the chip the slider shares a crowded row, so it gives up its greed. */
+  .chip .mSlide{flex:1 1 90px;min-width:70px}
+  .chip .mVal{font-size:15px}
   .chipTime{width:auto;flex:0 0 auto;padding:5px 8px;font-size:13px;border-radius:8px}
 
   .exp{margin-top:18px;padding-top:16px;border-top:1px solid var(--hair)}
@@ -557,8 +573,9 @@ function unionInto(incoming){
     const l = localById[id], r = remoteById[id];
     if (!(l && r)) return l || r;
     const days = { ...(l.days||{}), ...(r.days||{}) };   // union, remote wins a clash
+    const extra = { ...(l.extra||{}), ...(r.extra||{}) };// the payload rides with it
     const meta = (r.mAt||0) > (l.mAt||0) ? r : l;        // newer edit wins the fields
-    return { ...meta, days };
+    return { ...meta, days, extra };
   }).filter(h => {
     // A delete sticks unless the habit was edited AFTER it - editing it somewhere else
     // is a clear statement that it is still wanted, and that is the newer intent.
@@ -714,6 +731,23 @@ window.addEventListener('pageshow', autoPull);    // bfcache restore
 const isCounter = h => h.type === 'plus' || h.type === 'minus' || h.type === 'plusminus';
 const isScore   = h => h.type === 'score';
 const isTime    = h => h.type === 'time';
+const isMood    = h => h.type === 'mood';
+/* Mood keeps several readings a day, so it cannot store them in `days` - the whole
+   app reads that as one number per day (streaks, points, calendars, stats, sync).
+   `days[k]` therefore holds the day's MEAN, which every existing calculation can
+   use unchanged, and `extra[k]` holds the readings themselves. One side-channel,
+   handled everywhere `days` is handled: merged, wiped and cleared alongside it. */
+const MOOD_MIN = 1, MOOD_MAX = 10;
+const moodReads = (h, k) => { const a = (h.extra||{})[k]; return Array.isArray(a) ? a : []; };
+const moodLo = (h, k) => Math.min.apply(null, moodReads(h, k));
+const moodHi = (h, k) => Math.max.apply(null, moodReads(h, k));
+// Write the readings and the mean together, so the two can never drift apart.
+function setMoodDay(h, k, reads){
+  h.extra = h.extra || {};
+  if (!reads.length){ delete h.extra[k]; delete h.days[k]; return; }
+  h.extra[k] = reads.slice();
+  h.days[k]  = Math.round((reads.reduce((a,b)=>a+b,0) / reads.length) * 10) / 10;
+}
 
 /* Time habits log the FIRST time of day the thing happened, as minutes since local
    midnight. NONE_MIN is the sentinel for "it never happened today" - it sorts as the
@@ -857,12 +891,21 @@ const isDown = h => h.dir === 'down';
 // Band index 0..4 for a logged day, direction-aware, with the NONE sentinel pinned to
 // the top: a day you never did the thing at all is unambiguously the best day, however
 // the rest of the fortnight happened to fall.
+/* Mood is banded ABSOLUTELY, unlike every other card. Elsewhere a value only means
+   something next to your own recent form, so the bands are quintiles. A 3 out of 10
+   is a bad day whether or not the week around it was worse, and re-basing it every
+   week would repaint a rough patch green. The palette is the app's own amber-to-green
+   ramp - no true red anywhere in Bloupunt, since a day you recorded is never a
+   failure, however it went. */
+const moodBand = v => Math.max(0, Math.min(4, Math.floor((v - MOOD_MIN) / ((MOOD_MAX - MOOD_MIN + 1) / 5))));
+
 function bandFor(h){
   const days = h.days || {};
   const q = quintiler(last21(h));
   const down = isDown(h);
   return k => {
     const v = days[k];
+    if (isMood(h)) return moodBand(v);
     if (isTime(h) && v >= NONE_MIN) return 4;
     const b = q(v);
     return down ? 4 - b : b;
@@ -1117,6 +1160,36 @@ window.bump = (id, k, delta) => {
   render();
 };
 
+/* Mood: as many readings a day as you want. Nothing is ever overwritten - a 3 in the
+   morning and an 8 at night are both true, and flattening them to one number would
+   throw away the only thing this card is for. */
+window.moodSlide = el => {                       // live readout, no re-render mid-drag
+  const out = document.getElementById('moodV'+el.dataset.h);
+  if (out) out.textContent = el.value;
+  moodDraft[el.dataset.h] = +el.value;
+};
+window.logMood = id => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const k = todayKey();
+  setMoodDay(h, k, moodReads(h, k).concat(moodDraft[id] || 5));
+  save(); checkMilestones(); render();
+};
+window.addMoodTo = (id, k) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  setMoodDay(h, k, moodReads(h, k).concat(moodDraft['c'+id] || 5));
+  save(); render();
+};
+// Drop the last reading rather than the whole day - a mis-tap should cost one number.
+window.dropMood = (id, k) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const r = moodReads(h, k).slice(); r.pop();   // copy: moodReads hands back the live array
+  setMoodDay(h, k, r);
+  save(); render();
+};
+
 // Time habits: one tap stamps the current time, or you declare the day clean.
 // The first REAL time stands - a later slip never overwrites an earlier one. But
 // "didn't happen" is a claim about the whole day, and going on at 8pm falsifies it,
@@ -1196,6 +1269,7 @@ window.peekDay = (id, k) => {
    user is in the middle of, and yanking the ring out from under it would be its own
    kind of rude. */
 let peekTimer = null;
+let moodDraft = {};        // slider positions, per card - not persisted
 function armPeek(){
   clearTimeout(peekTimer);
   peekTimer = null;
@@ -1223,7 +1297,10 @@ window.askClearTo = k => { chipCut = k; render(); };
 window.cancelClearTo = () => { chipCut = null; render(); };
 window.doClearTo = (id, k) => {
   const h = data.habits.find(x => x.id === id);
-  if (h) for (const key of Object.keys(h.days)) if (key <= k) delete h.days[key];
+  if (h) for (const key of Object.keys(h.days)) if (key <= k){
+    delete h.days[key];
+    if (h.extra) delete h.extra[key];
+  }
   chipCut = null;
   save(); render();
 };
@@ -1249,6 +1326,7 @@ window.clearDay = (id, k) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
   delete h.days[k];
+  if (h.extra) delete h.extra[k];
   save(); render();
 };
 
@@ -1257,7 +1335,7 @@ window.askClearHist    = () => { clearHist = editing; render(); };
 window.cancelClearHist = () => { clearHist = null; render(); };
 window.doClearHist     = () => {
   const h = data.habits.find(x => x.id === editing);
-  if (h) { h.days = {}; save(); }
+  if (h) { h.days = {}; h.extra = {}; save(); }
   clearHist = null; render();
 };
 
@@ -1303,7 +1381,7 @@ window.commit = () => {
     const h = data.habits.find(x => x.id === editing);
     if (h){
       // A counter's -1 is not a time of day. Crossing families drops the old values.
-      if (famOf(h.type||'toggle') !== famOf(payload.type)) h.days = {};
+      if (famOf(h.type||'toggle') !== famOf(payload.type)){ h.days = {}; h.extra = {}; }
       Object.assign(h, payload, { mAt: Date.now() });
     }
   }
@@ -1433,11 +1511,17 @@ function peekValue(h, k){
   // Toggles and the score card carry their own answer already - a green block is
   // "done", and the score is printed on the bubble you just tapped. Repeating it adds
   // a word and no information, so these get the date alone.
-  if (!isTime(h) && !isCounter(h)) return '';
+  if (!isTime(h) && !isCounter(h) && !isMood(h)) return '';
   if (!has(h.days, k))
     return (data.paused && data.paused[k]) ? 'paused' : 'not logged';
   const v = h.days[k];
   if (isTime(h)) return v >= NONE_MIN ? 'didn\u2019t happen' : fmtTime(v);
+  if (isMood(h)){
+    const r = moodReads(h, k);
+    if (!r.length) return String(v);
+    const a = Math.min.apply(null, r), b = Math.max.apply(null, r);
+    return a === b ? String(a) : a+'\u2013'+b;      // a range, not an average
+  }
   return (h.days[k] > 0 ? '+' : '') + v;
 }
 
@@ -1564,7 +1648,7 @@ function fullGrid(h){
   const now = new Date(), today = todayKey();
   // Time habits are banded like counters here - the month grid is colour-only, so it
   // needs the good-to-less-good scale, not the toggle's flat green.
-  const graded = isCounter(h) || isTime(h), col = graded ? counterScale(h) : null;
+  const graded = isCounter(h) || isTime(h) || isMood(h), col = graded ? counterScale(h) : null;
 
   // Label the first column of each month. Suppress a label whose month is only a
   // narrow sliver at the left edge (fewer than 3 week-columns before the next month),
@@ -1637,6 +1721,18 @@ function dayChip(h){
         'onchange="setDayTime('+h.id+',\''+k+'\',this.value)">'+
       '<button class="chipBtn'+((v!==null&&v>=NONE_MIN)?' on':'')+'" onclick="setDayNone('+h.id+',\''+k+'\')">Didn’t happen</button>'+
       (logged ? '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
+  } else if (isMood(h)){
+    const reads = moodReads(h, k);
+    if (moodDraft['c'+h.id] === undefined) moodDraft['c'+h.id] = 5;
+    controls =
+      // Labelled: the slider carries a number too, and two bare numerals in one
+      // small chip is a puzzle rather than a readout.
+      '<span class="chipNum"><span class="chipK">logged</span>'+
+        (reads.length ? reads.join(', ') : '\u2014')+'</span>'+
+      moodSlider(h.id, moodDraft['c'+h.id], 'c'+h.id)+
+      '<button class="chipBtn" onclick="addMoodTo('+h.id+',\''+k+'\')">Add</button>'+
+      (reads.length ? '<button class="chipBtn" onclick="dropMood('+h.id+',\''+k+'\')">Undo one</button>'+
+        '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
   } else if (isCounter(h)){
     const val = h.days[k] || 0;
     controls =
@@ -1737,6 +1833,145 @@ function timeGraph(h){
   const pk = pi >= 0 ? peekBubble(h, daySel.key, pi, N_DAYS) : '';
   return '<div class="tgraph">'+pk+
     '<svg width="100%" height="'+GH+'">'+ segs + dots +'</svg></div>';
+}
+
+/* Mood's graph. Two lines, not one: the LOW of each day joined to the low of the next,
+   and the high to the high, so a day that swung from 3 to 9 reads as a band rather than
+   an average that happened to nobody. A day with a single reading has lo === hi, so both
+   lines meet at that point and it joins the day before and after on both edges - which
+   is exactly what "let the one recording join both the high and low" asks for, without
+   needing a case for it. */
+const MGH = 60;                    // taller than the time graph - this one draws a band
+function moodGraph(h){
+  const today = todayKey();
+  const info = windowDays(N_DAYS).map(d => {
+    const k = keyFor(d), reads = moodReads(h, k);
+    return { k, reads, logged: has(h.days, k) && reads.length > 0,
+             lo: reads.length ? Math.min.apply(null, reads) : null,
+             hi: reads.length ? Math.max.apply(null, reads) : null,
+             paused: !!(data.paused && data.paused[k] && !has(h.days,k)),
+             today: k===today,
+             sel: !!(daySel && daySel.id===h.id && daySel.key===k) };
+  });
+
+  // Same scaling rule as the time card: the window's own range, not the full 1-10, so a
+  // flat run still reads. A range under 3 points is widened so it cannot look dramatic.
+  const all = info.filter(x=>x.logged).flatMap(x=>x.reads);
+  let lo = all.length ? Math.min.apply(null, all) : MOOD_MIN;
+  let hi = all.length ? Math.max.apply(null, all) : MOOD_MAX;
+  if (hi - lo < 3){ const mid=(hi+lo)/2; lo = Math.max(MOOD_MIN, mid-1.5); hi = lo + 3; }
+  const yOf = v => MGH - GPAD - ((v - lo) / (hi - lo)) * (MGH - GPAD*2);   // 10 at the top
+  const xOf = i => ((i + 0.5) / N_DAYS) * 100;
+
+  // Join consecutive logged days; a run of paused days bridges the gap, as everywhere.
+  let segs = '';
+  const idx = info.map((x,i)=>x.logged?i:-1).filter(i=>i>=0);
+  for (let n=0;n<idx.length-1;n++){
+    const a = idx[n], b = idx[n+1];
+    let bridged = true;
+    for (let m=a+1;m<b;m++){ if (!info[m].paused){ bridged = false; break; } }
+    if (!bridged) continue;
+    for (const edge of ['lo','hi'])
+      segs += '<line x1="'+xOf(a).toFixed(2)+'%" y1="'+yOf(info[a][edge]).toFixed(1)+
+              '" x2="'+xOf(b).toFixed(2)+'%" y2="'+yOf(info[b][edge]).toFixed(1)+
+              '" stroke="var(--soft)" stroke-opacity=".42" stroke-width="1.5" stroke-linecap="round"/>';
+  }
+
+  const dots = info.map((x,i) => {
+    const cx = xOf(i).toFixed(2)+'%';
+    const act = 'peekDay('+h.id+',\''+x.k+'\')';
+    const hit = '<rect x="'+((i/N_DAYS)*100).toFixed(2)+'%" y="0" width="'+(100/N_DAYS).toFixed(2)+
+      '%" height="'+MGH+'" fill="transparent" style="cursor:pointer" role="button" tabindex="0" '+
+      'aria-label="'+x.k+(x.logged?', '+x.reads.join(', '):', not logged')+'" '+
+      'onclick="'+act+'"></rect>';
+    if (!x.logged){
+      const y = MGH - GPAD - (MGH - GPAD*2)/2;
+      return (x.today
+        ? '<circle cx="'+cx+'" cy="'+y+'" r="3.2" fill="none" stroke="var(--soft)" stroke-width="1.4"/>'
+        : '<circle cx="'+cx+'" cy="'+y+'" r="'+(x.paused?2.8:1.6)+'" fill="'+(x.paused?PAUSED_FILL:'var(--hair)')+'"/>')
+        + hit;
+    }
+    // One dot per reading, so three logs in a day look like three logs.
+    const r = x.sel ? 4.6 : 3.8;
+    return x.reads.map(v =>
+      '<circle cx="'+cx+'" cy="'+yOf(v).toFixed(1)+'" r="'+r+'" fill="'+bandColourIdx(moodBand(v))+
+      '" stroke="'+(x.sel?'var(--ink)':'rgba(61,59,55,.28)')+'" stroke-width="'+(x.sel?2:1)+'"/>'
+    ).join('') + hit;
+  }).join('');
+
+  const pi = (daySel && daySel.id===h.id) ? info.findIndex(x => x.k === daySel.key) : -1;
+  const pk = pi >= 0 ? peekBubble(h, daySel.key, pi, N_DAYS) : '';
+  return '<div class="tgraph">'+pk+
+    '<svg width="100%" height="'+MGH+'">'+ segs + dots +'</svg></div>';
+}
+
+function moodRow(h, today){
+  const open = expanded === h.id;
+  const reads = moodReads(h, today);
+  const logged = reads.length > 0;
+  const risk = rowRisk(h);
+  const s = statsFor(h);
+  const warn = !logged && s.missed === 1, alarm = !logged && s.missed >= 2;
+  const cls = 'row' + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls + (flashIds[h.id]?' undone':'');
+
+  const past = lastDaysVals(h, WIN_DAYS);
+  const base = past.length ? past.reduce((a,b)=>a+b,0)/past.length : null;
+  const lo = logged ? Math.min.apply(null, reads) : null;
+  const hi = logged ? Math.max.apply(null, reads) : null;
+  let sub;
+  if (!logged) sub = s.missed >= 1 ? missNote(h, s)
+      : (base===null ? 'Not logged yet' : 'Not logged yet \u00b7 usually '+(Math.round(base*10)/10));
+  else sub = (lo===hi ? String(lo) : lo+'\u2013'+hi)+' today \u00b7 '+
+      reads.length+' reading'+(reads.length===1?'':'s');
+
+  if (moodDraft[h.id] === undefined) moodDraft[h.id] = 5;
+  const sv = moodDraft[h.id];
+
+  let expBlock = '';
+  if (open){
+    const details = [
+      h.cue     ? '<div class="detail"><div class="dk">When and where</div><div class="dv">'+esc(h.cue)+'</div></div>' : '',
+      h.stack   ? '<div class="detail"><div class="dk">Straight after</div><div class="dv">'+esc(h.stack)+'</div></div>' : '',
+      h.minimum ? '<div class="detail"><div class="dk">The floor</div><div class="dv">'+esc(h.minimum)+'</div></div>' : ''
+    ].join('');
+    let n30 = 0, tot = 0; const c2 = midnight();
+    for (let i=0;i<30;i++){ const k = keyFor(c2); if (has(h.days,k)){ n30++; tot += moodReads(h,k).length; } c2.setDate(c2.getDate()-1); }
+    const best = past.length ? Math.max.apply(null, past) : null;
+    const low  = past.length ? Math.min.apply(null, past) : null;
+    const statBlock =
+      '<div class="stats">'+
+        '<div><div class="sl">Usual</div><div class="sv">'+(base===null?'\u2014':(Math.round(base*10)/10))+'</div></div>'+
+        '<div><div class="sl">Best</div><div class="sv">'+(best===null?'\u2014':best)+'</div></div>'+
+        '<div><div class="sl">Lowest</div><div class="sv">'+(low===null?'\u2014':low)+'</div></div>'+
+      '</div>'+
+      '<div class="next">'+n30+'/30 days logged \u00b7 '+tot+' reading'+(tot===1?'':'s')+'</div>';
+    expBlock = '<div class="exp">'+ details + fullGrid(h) + dayChip(h) + statBlock +
+      dayStatsBlock(h) + chainNote(h) + '</div>';
+  }
+
+  return '<div class="'+cls+'">'+
+    '<div class="top">'+
+      '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
+        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
+        '<div class="streak">'+sub+'</div>'+
+      '</button>'+
+      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
+        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+    '</div>'+
+    '<div class="mRow">'+
+      moodSlider(h.id, sv, String(h.id))+
+      '<button class="tNone mLog" onclick="logMood('+h.id+')">Log</button>'+
+    '</div>'+
+    riskBlock(risk) + moodGraph(h)  + expBlock +
+  '</div>';
+}
+
+// The slider is shared by the card and the day chip, so it takes its own key: the two
+// must not fight over one draft value while both are on screen.
+function moodSlider(id, v, key){
+  return '<input class="mSlide" type="range" min="'+MOOD_MIN+'" max="'+MOOD_MAX+'" step="1" '+
+      'value="'+v+'" data-h="'+key+'" aria-label="Mood 1 to 10" oninput="moodSlide(this)">'+
+    '<span class="mVal" id="moodV'+key+'">'+v+'</span>';
 }
 
 function timeRow(h, today){
@@ -1876,7 +2111,7 @@ function habitDayStats(h){
     }
   }
 
-  const timed = isTime(h), counted = isCounter(h);
+  const timed = isTime(h), counted = isCounter(h) || isMood(h);
   const mean = a => a.reduce((s,v)=>s+v,0)/a.length;
   const scored = buckets.map((b,i) => {
     if (timed) return b.vals.length >= 2
@@ -2049,7 +2284,7 @@ const WIN_DAYS = 91;                                    // 13 weeks, one screen 
 function scoreInsights(){
   const habits = data.habits.filter(h => !isScore(h));
   const paused = data.paused || {};
-  if (!habits.length) return { sections: [], note: 'Add a habit and this fills in.' };
+  if (!habits.length) return { sections: [], note: 'Add a card and this fills in.' };
   const first = firstLogAll();
   if (!first) return { sections: [], note: 'Nothing logged yet.' };
 
@@ -2236,6 +2471,7 @@ function habitRow(h){
   if (isScore(h)) return scoreRow(h);
   const today = todayKey();
   if (isTime(h)) return timeRow(h, today);
+  if (isMood(h)) return moodRow(h, today);
   if (isCounter(h)) return counterRow(h, today);
   const done  = !!h.days[today];
   const s     = statsFor(h);
@@ -2307,7 +2543,7 @@ function habitRow(h){
 }
 
 // Values only mean something within a family, so switching families must drop history.
-const famOf = t => t==='score' ? 'score' : t==='time' ? 'time'
+const famOf = t => t==='score' ? 'score' : t==='time' ? 'time' : t==='mood' ? 'mood'
   : (t==='plus'||t==='minus'||t==='plusminus') ? 'counter' : 'toggle';
 
 // Which types can have a direction. Toggles and the score have nothing to rank.
@@ -2321,7 +2557,10 @@ const segBtn = (t, label) =>
     'onclick="setFormType(\''+t+'\')">'+label+'</button>';
 
 function typeHint(t){
-  return t==='plus' ? 'Tap + each time (e.g. a glass of water). Cells are tinted by your 7-day average.'
+  return t==='mood' ? 'A slider from 1 to 10, logged as often as you like in a day. '+
+      'Several readings become a range, drawn as a band so a good morning and a bad '+
+      'evening both show.'
+    : t==='plus' ? 'Tap + each time (e.g. a glass of water). Cells are tinted by your 7-day average.'
     : t==='minus' ? 'Tap − each time (e.g. a slip you want to avoid). Cells are tinted by your 7-day average.'
     : t==='plusminus' ? 'Both buttons: + for a win, − for a slip. The day is the running total, tinted by your 7-day average.'
     : t==='time' ? 'Log the first time of day it happened — one tap stamps the clock, or mark the day clean. Drawn as a graph so you can see it moving.'
@@ -2329,7 +2568,8 @@ function typeHint(t){
     : 'A simple daily tick. Builds streaks, milestones and the warming background.';
 }
 
-const typeLabel = t => t==='plus' ? 'Counter · +'
+const typeLabel = t => t==='mood' ? 'Mood · 1–10'
+  : t==='plus' ? 'Counter · +'
   : t==='minus' ? 'Counter · −'
   : t==='plusminus' ? 'Counter · +/−'
   : t==='time' ? 'First time of day'
@@ -2343,7 +2583,8 @@ function editorHTML(title){
       '<label class="lbl">How you log it</label>'+
       '<div class="picker">'+
         segBtn('toggle','Tick')+ segBtn('plus','+')+ segBtn('minus','−')+ segBtn('plusminus','+/−')+
-        segBtn('time','Time')+ (allowScore ? segBtn('score','Score') : '')+
+        segBtn('time','Time')+ segBtn('mood','Mood')+
+        (allowScore ? segBtn('score','Score') : '')+
       '</div>'+
       '<p class="hint">'+typeHint(form.type)+'</p>'+
       ((eh && famOf(eh.type||'toggle') !== famOf(form.type) && Object.keys(eh.days||{}).length)
@@ -2520,13 +2761,13 @@ function render(){
         '<p class="serif" style="font-size:17px;margin-bottom:8px">Start with one or two.</p>'+
         '<p style="font-size:13px;color:var(--soft);margin-bottom:22px;line-height:1.6">'+
           'More than that and the chain breaks<br>before it has a chance to form.</p>'+
-        '<button class="btnP" onclick="openNew()">Add a habit</button>'+
+        '<button class="btnP" onclick="openNew()">Add a card</button>'+
       '</div>';
     } else {
       body = '<div class="stack">'+
         data.habits.map(habitRow).join('')+
         (chain.length < 4
-          ? '<button class="btnDash" onclick="openNew()">+ Add a habit</button>' : '')+
+          ? '<button class="btnDash" onclick="openNew()">+ Add a card</button>' : '')+
       '</div>';
     }
   } else {
@@ -2562,7 +2803,7 @@ function render(){
 
     const adder = editing === 'new'
       ? editorHTML('New habit')
-      : '<button class="btnDash" onclick="openNew()">+ Add a habit</button>';
+      : '<button class="btnDash" onclick="openNew()">+ Add a card</button>';
 
     const cap = (data.habits.length >= 3 && !editing)
       ? '<p class="cap">Three is plenty. Adding more is usually how the chain gets dropped.</p>' : '';
