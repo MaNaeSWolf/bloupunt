@@ -1526,6 +1526,51 @@ Two harness notes, again: a real click is needed, since programmatic `.focus()` 
 focus events in an unfocused pane, and the trailing blur after a synthetic `type` is the
 harness releasing focus, not the app. → `sw.js v55`.
 
+### 2026-08-21 (later) — Never rebuild the page under a keyboard
+
+Reported: typing in the journal makes the keyboard drop and the view jump, whether the
+card is open or closed.
+
+**The cause is architectural, not a slip.** `render()` replaces the whole `innerHTML`.
+Android dismisses the soft keyboard the instant a focused input leaves the document, and
+re-focusing it from code does **not** bring the keyboard back — that requires a real user
+gesture. So *any* render arriving mid-sentence is felt as the keyboard vanishing and the
+page moving. v55 made this certain by calling `render()` on the first keystroke to open
+the card, but every other render is just as dangerous: a sync landing, a milestone, a
+window focus event as the keyboard itself opens.
+
+So the rule is now absolute: **while a journal box has focus, nothing re-renders.**
+`jTyping` holds the id, `render()` returns early and sets `jPending`, and the blur runs
+the deferred paint. The box still grows on the first keystroke — by adding a class to the
+live element, never by rebuilding it — so the textarea keeps its identity for the whole
+session of typing. The rest of the expanded card is painted once you tap away.
+
+Two supporting fixes:
+
+- **`persist()` was running on every keystroke**, and it serialises the entire store.
+  That is real work on a phone carrying months of history, and it showed up as lag. Now
+  throttled: leading edge at most once a second, trailing edge 300ms after you stop. The
+  most that can ever be in flight is a third of a second of typing, and `flushJournal()`
+  writes it out on `pagehide` regardless.
+- **The blur render is deferred a tick.** A tap on another control fires blur first, and
+  re-rendering there would pull that control out of the DOM before its own click could
+  land — the same trap the peek dismissal hit in v49.
+
+**And a deadlock I caught in testing, not in the field.** The safety valve that clears a
+guard whose textarea has gone was written at the *end* of `render()` — which the guard's
+own early return never reaches. Set the guard, remove the box, and the app would stop
+repainting **permanently**. It is now the first thing `render()` does, before the early
+return. Worth stating plainly: a guard clause needs its escape hatch on the same side of
+the return as the guard.
+
+Verified with real clicks and real typing, on the measurement that actually matters —
+**node identity**. Typed 88 characters into the collapsed box: the textarea was the same
+DOM node before and after, `scrollY` never moved off 0, the box grew 66→168px, focus and
+caret held, text reached localStorage, and the header tracked it live. On blur the
+deferred render painted the expanded card with its calendar, and collapsing returned the
+box to two lines. A stale guard now clears itself instead of freezing the app.
+→ `sw.js v56`.
+
 ---
 
 ## Still to do / open items
