@@ -1681,6 +1681,29 @@ a red S. Then end to end with the network stubbed and the real `pullRemote`: a f
 written with one passphrase and pulled with another gives `badpass` and leaves the local
 habits **untouched**, while the correct passphrase merges as normal. → `sw.js v59`.
 
+### 2026-08-21 (later) — 404 means two things, and only one of them was being said
+
+The new messages did their job immediately: Cora's phone said **repo not found** rather
+than "sync failed". But the message was still only half true, and the half it left out is
+the likelier one.
+
+GitHub returns **404 for a private repo a token cannot see**, exactly as it does for a
+repo that does not exist. That is deliberate — otherwise a token could be used to probe
+for the existence of private repositories. Confirmed it directly: an unauthenticated GET
+against a real private repo's contents path returns 404, while the owner endpoint returns
+200. So the app cannot tell the two apart, and neither can anyone reading the error.
+
+"Repo not found — check the username and repo name" therefore sent someone off to inspect
+their spelling, when a token that was working on another phone five minutes earlier is far
+more likely to be missing that repo from its **Repository access** list. The message now
+names both causes and says outright that GitHub answers the same either way.
+
+A reminder recorded for later: a fine-grained token has two separate things to get right —
+which repositories it can reach, and what it may do there. Wrong repo list gives 404 and
+reads as "not found"; right repo list with read-only Contents gives 403 and reads as
+"cannot write here". Two different messages, and now they mean two different fixes.
+→ `sw.js v60`.
+
 ---
 
 ## Still to do / open items

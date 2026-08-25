@@ -482,7 +482,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v59';
+const BUILD = 'bloupunt-v60';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -678,7 +678,8 @@ function syncLabel(){
     badpass:'Sync: the passphrase does not open this file \u2014 check the passphrase, and check '+
             'the file name is yours',
     noaccess:'Sync: the token cannot write here \u2014 it needs Contents: Read and write on this repo',
-    norepo:'Sync: repo not found \u2014 check the username and repo name',
+    norepo:'Sync: cannot reach that repo \u2014 check the name, and that the token is scoped '+
+           'to it with Contents: Read and write. GitHub answers the same either way.',
     offline:'Sync: no connection',
     error:'Sync: failed \u2014 check details / connection'
   }[syncStatus];
