@@ -1799,6 +1799,33 @@ labels, no gaps where a cue would have been. → `sw.js v63`.
 
 ---
 
+### 2026-08-31 — The ring drew a chain that was not being earned
+
+The band around the week strip bridged one missed day. A card reading "14 days
+running" showed the ring reaching back past a gap to enclose two earlier stray days,
+so the picture claimed a 17-day chain the points were never paying for.
+
+The bug was a premise, not arithmetic. `chainStrip()` walked backward from today
+allowing a single unlogged gap, on the stated reasoning that the ring "spans the
+single grace gap, because that is exactly what the chain itself spans." It does not.
+`chainRun()` sets `run = 0` on **every** miss, graced or not — the fortnightly free
+day protects the `lvl` you already hold, it never extends the clean run. Only
+`paused` days pass through leaving `run` untouched. So the one thing the ring
+bridged was the one thing the chain does not.
+
+Removed the `bridged` flag; the walk now stops at the first miss:
+
+```js
+while (i >= 0 && (info[i].logged || info[i].paused)) i--;
+```
+
+Paused days still bridge, an unlogged today is still grace, a leading paused day is
+still trimmed so the ring opens on a logged cell, and a run that fills the window
+still gets `.openL`. Missing both yesterday and today draws no ring at all, which is
+correct — `run` is 0 there even while the tier survives.
+
+→ `sw.js v64`, `BUILD v64`.
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it

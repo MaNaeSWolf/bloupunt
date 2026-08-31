@@ -488,7 +488,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v63';
+const BUILD = 'bloupunt-v64';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -1927,21 +1927,19 @@ function chainStrip(h){
   }).join('');
 
   // Ring the run that is currently earning EXTRA points, so a chain worth more than
-  // 1pt/day reads as one object rather than separate blocks. It spans paused days and
-  // the single grace gap, because that is exactly what the chain itself spans. A plain
-  // 5-day streak earns nothing extra and gets no ring.
+  // 1pt/day reads as one object rather than separate blocks. It spans PAUSED days only,
+  // because that is exactly what the chain itself spans: chainRun() sets run = 0 on
+  // every miss, graced or not. The fortnightly free day protects the LEVEL you hold, it
+  // never extends the clean run - so a ring that bridged a missed day drew a chain that
+  // was not being earned. Stop at the first miss. A plain 5-day streak earns nothing
+  // extra and gets no ring.
   let ring = '';
   if (chainRun(h).tier > 1){
     let i = N_DAYS - 1;
     if (!info[i].logged && !info[i].paused) i--;          // today is grace until tomorrow
     if (i >= 0 && (info[i].logged || info[i].paused)){
       const last = i;
-      let bridged = false;
-      while (i >= 0){
-        if (info[i].logged || info[i].paused){ i--; continue; }
-        if (!bridged){ bridged = true; i--; continue; }   // the one free day
-        break;
-      }
+      while (i >= 0 && (info[i].logged || info[i].paused)) i--;
       const openLeft = i < 0;                             // runs off the visible window
       let first = i + 1;
       while (first < last && !info[first].logged) first++;
