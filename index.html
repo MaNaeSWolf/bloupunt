@@ -490,7 +490,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v65';
+const BUILD = 'bloupunt-v66';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -2606,12 +2606,30 @@ function timeTrend(h, days){
   const span = pts[0].x - pts[pts.length - 1].x;
   if (span < spanNeed - 1) return null;
 
-  const n = pts.length;
-  const mx = pts.reduce((s,p)=>s+p.x,0)/n, my = pts.reduce((s,p)=>s+p.y,0)/n;
-  let num = 0, den = 0;
-  for (const q of pts){ num += (q.x-mx)*(q.y-my); den += (q.x-mx)*(q.x-mx); }
-  if (!den) return null;
-  return { change: (num/den) * days, n };        // minutes across the whole window
+  /* Theil-Sen: the MEDIAN of the slope between every pair of points, not least squares.
+
+     Least squares was the first attempt and it failed the question this feature exists to
+     answer. Six days improving eight minutes a day, then one bad morning eighty-five
+     minutes off trend, and it reported "14m later" - it called a good week a decline,
+     because squaring the residuals hands the worst day the loudest voice, and a point at
+     the end of the window has the most leverage of all. Over only seven points one
+     disaster is enough to invert the answer.
+
+     Taking the median slope instead means an outlier is one vote among twenty-one rather
+     than a weight on the line. It takes roughly a third of the points going bad before
+     the estimate moves at all, which is the property actually wanted here: am I improving,
+     even though today was terrible. On clean data it agrees with least squares exactly. */
+  const slopes = [];
+  for (let i = 0; i < pts.length; i++)
+    for (let j = i + 1; j < pts.length; j++){
+      const dx = pts[i].x - pts[j].x;
+      if (dx) slopes.push((pts[i].y - pts[j].y) / dx);
+    }
+  if (!slopes.length) return null;
+  slopes.sort((a,b) => a-b);
+  const m = slopes.length >> 1;
+  const slope = slopes.length % 2 ? slopes[m] : (slopes[m-1] + slopes[m]) / 2;
+  return { change: slope * days, n: pts.length };   // minutes across the whole window
 }
 
 // "23m earlier", and whether earlier is the direction this habit wants.

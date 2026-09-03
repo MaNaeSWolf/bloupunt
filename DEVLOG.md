@@ -1867,6 +1867,42 @@ has existed. Only ever visible on exact multiples of 60, which is why it lasted.
 
 ---
 
+### 2026-08-21 (later) — The slope has to survive a bad day
+
+Pushback on v65: "am I making improvement, even if today was a bad day?" I answered that
+this was already what it did — a slope, not today minus last Tuesday — and then built the
+case to prove it. The case proved the opposite.
+
+Six days improving eight minutes a day, then one morning eighty-five minutes off trend.
+Least squares reported **"14m later"**. It called a good week a decline. Strip the bad day
+out and the same week reads −56. So one point flipped the sign of the answer.
+
+That is not a tuning problem, it is what least squares is. Squaring the residuals hands
+the worst day the loudest voice, and a point at the END of the window carries the most
+leverage of all — the two things combine exactly where a habit tracker least wants them
+to. Over seven points, one disaster is enough to invert the result.
+
+**Theil-Sen instead**: take the slope between every pair of points and use the median.
+An outlier becomes one vote among twenty-one rather than a weight on the line, and it
+takes roughly a third of the points going bad before the estimate moves at all. On clean
+data it agrees with least squares to the decimal, so nothing is traded away for it.
+
+Same case, now: **−56m — "56m earlier"**, identical to the week with the bad day removed.
+The disaster is absorbed completely, which is the whole ask.
+
+Verified across the shapes that matter: one bad day changes the answer not at all; two bad
+days moderate it to −35 rather than flipping it; a genuinely worsening week still reports
+"42m later", so it has not simply been taught to say nice things; a clean 2-min-a-day ramp
+still gives exactly −14 and −60; four logs spread across six days work off real day
+spacing; four consecutive days span only three and are still refused. Direction still
+turns the same movement green on "earlier is better" and clay on "later is better".
+
+Worth keeping: I was confident and wrong, and the thing that settled it was building the
+user's exact scenario rather than restating the design. The scenario took two minutes and
+the argument would have gone on for several. → `sw.js v66`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
