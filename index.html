@@ -490,7 +490,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v66';
+const BUILD = 'bloupunt-v67';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -2629,27 +2629,60 @@ function timeTrend(h, days){
   slopes.sort((a,b) => a-b);
   const m = slopes.length >> 1;
   const slope = slopes.length % 2 ? slopes[m] : (slopes[m-1] + slopes[m]) / 2;
-  return { change: slope * days, n: pts.length };   // minutes across the whole window
+  /* Theil-Sen's companion intercept: the median of y - slope*x. With x measured in
+     days back from today, x = 0 IS today, so this is the fitted time for today -
+     the trend line's own opinion of where you are, which is steadier than whatever
+     actually happened this morning and is the honest place to project from. */
+  const at0 = pts.map(q => q.y - slope * q.x).sort((a,b) => a-b);
+  const k = at0.length >> 1;
+  const base = at0.length % 2 ? at0[k] : (at0[k-1] + at0[k]) / 2;
+  return { slope, base, change: slope * days, week: slope * 7, n: pts.length };
 }
 
 // "23m earlier", and whether earlier is the direction this habit wants.
+/* Everything is quoted as a rate PER WEEK, whichever window it came from.
+
+   "2h 47m earlier" over thirty days is a real number and a useless one: it sounds
+   enormous, it says nothing about pace, and it cannot be compared with the seven-day
+   figure sitting directly above it - 14m across a week and 2h47m across a month are
+   nearly the same speed, but nothing about those two strings suggests it. Normalising
+   both to a week makes the two lines answer the same question, so a wider gap between
+   them now means something: recent pace differs from the month's. */
 function trendLine(h, days, label){
   const r = timeTrend(h, days);
   if (!r) return '';
-  const flat = Math.abs(r.change) < 3;           // under 3 minutes is noise, not a trend
-  const earlier = r.change < 0;
+  const flat = Math.abs(r.week) < 3;             // under 3 min a week is noise, not a trend
+  const earlier = r.week < 0;
   const good = isDown(h) ? earlier : !earlier;
   const text = flat ? 'holding steady'
-    : fmtGap(r.change) + ' ' + (earlier ? 'earlier' : 'later');
+    : fmtGap(r.week) + ' a week ' + (earlier ? 'earlier' : 'later');
   const cls = flat ? '' : (good ? ' good' : ' bad');
   return '<div class="ins"><span class="insK">'+label+'</span>'+
     '<span class="insV'+cls+'">'+esc(text)+'</span></div>';
 }
 
+/* A rate is still an abstraction. This turns it into the thing actually being tracked:
+   a time on a clock, one week out. Projected from the trend line's own value for today
+   rather than from today's actual log, so one late morning does not drag the forecast
+   with it.
+
+   Suppressed if it lands outside the day. A trend steep enough to walk off the clock is
+   a trend that has stopped describing anything, and printing "26:10" or clamping it to
+   23:59 would both be inventing a result the data does not support. */
+function projectionLine(h){
+  const r = timeTrend(h, 7) || timeTrend(h, 30);
+  if (!r) return '';
+  const next = r.base + r.week;
+  if (next < 0 || next >= NONE_MIN) return '';
+  const flat = Math.abs(r.week) < 3;
+  return '<div class="ins"><span class="insK">'+(flat ? 'Holding around' : 'At this rate, next week')+
+    '</span><span class="insV">'+esc(fmtTime(Math.round(next)))+'</span></div>';
+}
+
 function trendBlock(h){
   const a = trendLine(h, 7,  'Last 7 days'), b = trendLine(h, 30, 'Last 30 days');
   if (!a && !b) return '';
-  return '<div class="insH">TRAJECTORY</div>' + a + b;
+  return '<div class="insH">TRAJECTORY</div>' + a + b + projectionLine(h);
 }
 
 function dayStatsBlock(h){

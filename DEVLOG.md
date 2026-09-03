@@ -1903,6 +1903,38 @@ the argument would have gone on for several. → `sw.js v66`.
 
 ---
 
+### 2026-08-21 (later) — A rate you can feel, and where it lands
+
+The maths was right by v66 and still not saying much. "2h 47m earlier" over thirty days is
+a true number and a useless one: it sounds enormous, it conveys no pace, and it cannot be
+compared with the seven-day figure directly above it. 14m across a week and 2h47m across a
+month are almost the same speed; nothing about those two strings suggests it.
+
+**Both lines are now quoted per week**, whichever window they came from. That makes them
+answer the same question, which in turn makes a gap between them mean something: 56m a
+week recently against 7m a week over the month says the last stretch has been sharper than
+the trend. That signal did not exist before — it was hidden inside two incomparable units.
+
+**And a projection**, which was the suggestion and is the better half of this change. A
+rate is still an abstraction; a clock time is the thing actually being tracked. "At this
+rate, next week · 07:16" needs no interpreting.
+
+Projected from the trend line's own value for today, not from today's log. Theil-Sen's
+companion intercept is the median of `y - slope*x`, and with x measured in days back from
+today, x = 0 IS today — so the line's opinion of this morning, which is steadier than
+whatever actually happened. Verified on a card whose header reads "Logged 09:20 · 1h 17m
+later than usual": the trend still reports 14m a week earlier and projects 07:16 from a
+fitted 07:30. The bad day shows where it belongs and nowhere else.
+
+Suppressed if the projection lands outside the day. A trend steep enough to walk off the
+clock inside a week has stopped describing anything, and both printing "26:10" and
+clamping it to 23:59 would be inventing a result. Tested: a 200-min-a-day slope drops the
+projection line and keeps the rate. Flat data reads "holding steady" twice and then
+"Holding around · 07:30", which is worth saying rather than hiding.
+→ `sw.js v67`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
