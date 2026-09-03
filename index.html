@@ -218,6 +218,8 @@
   .ins{display:flex;justify-content:space-between;gap:14px;font-size:12.5px;line-height:1.95}
   .insK{color:var(--soft);flex-shrink:0}
   .insV{color:var(--ink);text-align:right}
+  .insV.good{color:var(--sageDeep)}
+  .insV.bad{color:var(--clay)}
   .insNote{font-size:12.5px;color:var(--soft);line-height:1.6}
   .insH{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--sageDeep);
     font-weight:600;margin:15px 0 5px}
@@ -488,7 +490,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v64';
+const BUILD = 'bloupunt-v65';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -879,8 +881,14 @@ const fmtTime = v => {
 };
 // "1h 12m" / "40m" - used for the gap against your own recent baseline.
 const fmtGap = m => {
+  /* The .trim() here used to sit on the inner ternary, so it trimmed the empty string
+     rather than the result: an exact hour came out as "1h " with a trailing space, which
+     then read as "1h  earlier". Only ever visible on exact multiples of 60, which is why
+     it survived this long in the "later than usual" line. */
   const a = Math.abs(Math.round(m));
-  return a >= 60 ? Math.floor(a/60)+'h '+(a%60?(a%60)+'m':'').trim() : a+'m';
+  if (a < 60) return a + 'm';
+  const h = Math.floor(a / 60), r = a % 60;
+  return r ? h + 'h ' + r + 'm' : h + 'h';
 };
 const hasScore  = () => data.habits.some(isScore);
 // "Logged" == a record exists for that day. Toggle stores 1; a counter may store
@@ -2445,7 +2453,7 @@ function timeRow(h, today){
         '<div><div class="sl">Clean</div><div class="sv">'+clean+'/'+n30+'</div></div>'+
       '</div>';
     expBlock = '<div class="exp">'+ details + fullGrid(h) + dayChip(h) + statBlock +
-      dayStatsBlock(h) + chainNote(h) + '</div>';
+      trendBlock(h) + dayStatsBlock(h) + chainNote(h) + '</div>';
   }
 
   const clean = logged && v >= NONE_MIN;      // marked "didn't happen" - still revocable
@@ -2561,6 +2569,69 @@ function habitDayStats(h){
     : Math.round(x.d*100)+'%';
   return { best: DOW_FULL[best.i]+' \u00b7 '+fmt(best),
            worst: DOW_FULL[worst.i]+' \u00b7 '+fmt(worst) };
+}
+
+/* Which way a time habit is actually moving.
+
+   A slope, not a subtraction. "The 7 day change" read literally is today minus the day
+   seven days ago, which hangs the entire answer on two mornings - oversleep once and a
+   good fortnight reports as a collapse. Least squares over every log in the window uses
+   all of them, so one bad day bends the line a little instead of defining it. The result
+   is then multiplied back out to the width of the window, so "7 days" still means seven
+   days rather than a per-day figure nobody can picture.
+
+   The sentinel is excluded, as everywhere else that reads a clock: a "didn't happen" day
+   is stored as 1440 to sort as the latest possible moment, and averaging it into a trend
+   would read as a catastrophic slide toward midnight. That mistake is already in this
+   log once (v45, "usual 08:12"); it is not going in again.
+
+   Nothing is shown until the window can support it. A trend drawn through three points
+   is decoration. */
+function timeTrend(h, days){
+  const start = habitStart(h);
+  if (!start) return null;
+  const end = midnight();
+  const pts = [];
+  for (let i = 0; i < days; i++){
+    const d = new Date(end); d.setDate(end.getDate() - i);
+    if (d < start) break;                       // never reach behind the first log
+    const v = h.days[keyFor(d)];
+    if (v === undefined || v >= NONE_MIN) continue;
+    pts.push({ x: -i, y: v });
+  }
+  // Enough points, and spread widely enough to be a trend rather than a cluster.
+  const need = days <= 7 ? 4 : 10;
+  const spanNeed = days <= 7 ? 5 : 20;
+  if (pts.length < need) return null;
+  const span = pts[0].x - pts[pts.length - 1].x;
+  if (span < spanNeed - 1) return null;
+
+  const n = pts.length;
+  const mx = pts.reduce((s,p)=>s+p.x,0)/n, my = pts.reduce((s,p)=>s+p.y,0)/n;
+  let num = 0, den = 0;
+  for (const q of pts){ num += (q.x-mx)*(q.y-my); den += (q.x-mx)*(q.x-mx); }
+  if (!den) return null;
+  return { change: (num/den) * days, n };        // minutes across the whole window
+}
+
+// "23m earlier", and whether earlier is the direction this habit wants.
+function trendLine(h, days, label){
+  const r = timeTrend(h, days);
+  if (!r) return '';
+  const flat = Math.abs(r.change) < 3;           // under 3 minutes is noise, not a trend
+  const earlier = r.change < 0;
+  const good = isDown(h) ? earlier : !earlier;
+  const text = flat ? 'holding steady'
+    : fmtGap(r.change) + ' ' + (earlier ? 'earlier' : 'later');
+  const cls = flat ? '' : (good ? ' good' : ' bad');
+  return '<div class="ins"><span class="insK">'+label+'</span>'+
+    '<span class="insV'+cls+'">'+esc(text)+'</span></div>';
+}
+
+function trendBlock(h){
+  const a = trendLine(h, 7,  'Last 7 days'), b = trendLine(h, 30, 'Last 30 days');
+  if (!a && !b) return '';
+  return '<div class="insH">TRAJECTORY</div>' + a + b;
 }
 
 function dayStatsBlock(h){

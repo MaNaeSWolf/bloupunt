@@ -1826,6 +1826,47 @@ correct — `run` is 0 there even while the tier survives.
 
 → `sw.js v64`, `BUILD v64`.
 
+### 2026-08-21 (later) — Which way a time habit is moving
+
+A time card could say where you are and where you have been, but not which direction you
+were heading. Two lines now: the change across the last 7 days and the last 30.
+
+**A slope, not a subtraction.** "The 7 day change" read literally is today minus the day
+seven days ago, and that hangs the whole answer on two mornings — oversleep once and a
+good fortnight reports as a collapse. Least squares over every log in the window uses all
+of them, so one bad day bends the line instead of defining it. The slope is then
+multiplied back out to the width of the window, so "7 days" still means seven days rather
+than a per-day figure nobody can picture.
+
+**The sentinel is excluded**, as everywhere else that reads a clock. A "didn't happen" day
+is stored as 1440 so it sorts as the latest possible moment; averaged into a trend it
+would read as a catastrophic slide toward midnight. That exact mistake is already in this
+log once — the "usual 08:12" of v45 — and it is not going in again.
+
+**Direction is meaning, not sign.** Getting earlier is a win on a card set to "earlier is
+better" and a loss on one set to "later is better", so the same slope is green on one and
+clay on the other. Under three minutes across the window reads "holding steady", because
+two minutes over a week is not a trajectory.
+
+**Nothing is shown it cannot support.** Seven days needs four logs spanning five days;
+thirty needs ten spanning twenty. The window never reaches behind the first log, so a
+young habit shows a 7-day line and no 30-day line rather than a number invented out of
+four days of history.
+
+Verified against a seeded slope of exactly 2 minutes earlier per day: the 7-day line
+reports −14 and the 30-day −60, to the decimal. Dropping two sentinels into the same
+series changes the point count from 30 to 28 and the answer not at all. An 8-day-old habit
+gives a 7-day figure and null for 30; three points give nothing. Flipping `dir` on
+identical data flips green to clay.
+
+**And a bug this surfaced.** `fmtGap`'s `.trim()` sat on the inner ternary rather than the
+result, so an exact hour rendered as `"1h "` — which came out as "1h  earlier" here, and
+has been quietly doing the same to the "later than usual" line for as long as that line
+has existed. Only ever visible on exact multiples of 60, which is why it lasted.
+→ `sw.js v65`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
