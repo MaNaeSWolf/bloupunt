@@ -254,6 +254,20 @@
   .jBox:focus{outline:none;border-color:var(--sage)}
   .jBox::placeholder{color:#BFB9B0}
   .jActs{display:flex;gap:10px;margin-top:10px}
+  .bRow{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
+  .spendIn{flex:1 1 90px;min-width:0;background:var(--bg);border:1px solid var(--faint);
+    border-radius:10px;padding:9px 11px;font-family:inherit;font-size:14px;color:var(--ink)}
+  .spendIn:focus{outline:none;border-color:var(--sage);background:var(--card)}
+  .bAdd,.bNil{flex:0 0 auto}
+  .chip .spendIn{flex:1 1 80px;padding:6px 9px;font-size:13px}
+  /* Over budget: the card says so before you have read a word of it. */
+  .row.overspent{border-color:#E7C9BE;background:linear-gradient(var(--clayBg),var(--clayBg))}
+  .streak .over{color:var(--clay);font-weight:600}
+  .sv.bad{color:var(--clay)}
+  .bFld{display:flex;align-items:center;gap:8px}
+  .bFld input{flex:1;min-width:0}
+  .curIn{flex:0 0 52px;text-align:center}
+  .bUnit{flex:0 0 auto;font-size:13px;color:var(--soft)}
   .mRow{display:flex;align-items:center;gap:12px;margin-top:14px}
   .mSlide{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:4px;
     border-radius:2px;background:linear-gradient(90deg,#C9A961,#EDE9E2,#5E8163);
@@ -490,7 +504,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v67';
+const BUILD = 'bloupunt-v68';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -825,6 +839,71 @@ const isScore   = h => h.type === 'score';
 const isTime    = h => h.type === 'time';
 const isMood    = h => h.type === 'mood';
 const isJournal = h => h.type === 'journal';
+const isBudget  = h => h.type === 'budget';
+
+/* Budget rides the same side channel as mood: several amounts a day, so `extra[k]` holds
+   the individual spends and `days[k]` holds the day's TOTAL - the one number every other
+   part of the app already knows how to read.
+
+   A zero is a real, deliberate entry here, not an absence. Spending nothing is the best
+   possible day, and if it left no record the chain would break on exactly the days that
+   went best. So "Nothing today" writes a 0, and `has()` counts it, and the streak means
+   what it means everywhere else in this app: you showed up and recorded. */
+const spends    = (h, k) => { const a = (h.extra||{})[k]; return Array.isArray(a) ? a : []; };
+function setSpend(h, k, list){
+  h.extra = h.extra || {};
+  if (!list.length){ delete h.extra[k]; delete h.days[k]; return; }
+  h.extra[k] = list.slice();
+  h.days[k]  = Math.round(list.reduce((a,b)=>a+b,0) * 100) / 100;
+}
+// Whole numbers stay whole; cents appear only when there are cents to show.
+function fmtMoney(h, v){
+  const sym = ((h && h.cur) || 'R').trim();
+  const a = Math.abs(v);
+  const n = Math.abs(a - Math.round(a)) < 0.005
+    ? Math.round(a).toLocaleString()
+    : a.toLocaleString(undefined, { minimumFractionDigits:2, maximumFractionDigits:2 });
+  return sym + n;
+}
+
+/* The period a date falls in. Weeks start Monday and months start on the 1st, because
+   that is how people already think about a budget; a custom length counts from an anchor
+   so the cycle stays fixed rather than drifting with whatever day you happen to open it. */
+function budgetPeriod(h, d){
+  const x = new Date(d); x.setHours(0,0,0,0);
+  if (h.period === 'month')
+    return { start: new Date(x.getFullYear(), x.getMonth(), 1),
+             end:   new Date(x.getFullYear(), x.getMonth()+1, 0) };
+  if (h.period === 'days'){
+    const n = Math.max(1, Math.round(+h.pdays || 7));
+    const anchor = h.anchor ? parseKey(h.anchor) : (habitStart(h) || new Date(x));
+    anchor.setHours(0,0,0,0);
+    const idx = Math.floor((x - anchor) / 86400000 / n);   // floor is right for past too
+    const s = new Date(anchor); s.setDate(anchor.getDate() + idx * n);
+    const e = new Date(s);      e.setDate(s.getDate() + n - 1);
+    return { start:s, end:e };
+  }
+  const dow = (x.getDay() + 6) % 7;                        // 0 = Monday
+  const s = new Date(x); s.setDate(x.getDate() - dow);
+  const e = new Date(s); e.setDate(s.getDate() + 6);
+  return { start:s, end:e };
+}
+
+function budgetState(h){
+  const today = midnight();
+  const { start, end } = budgetPeriod(h, today);
+  let spent = 0;
+  for (const d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
+    const v = (h.days||{})[keyFor(d)];
+    if (typeof v === 'number') spent += v;
+  }
+  const budget = +h.budget || 0;
+  const len = Math.round((end - start) / 86400000) + 1;
+  return { start, end, spent: Math.round(spent*100)/100, budget,
+           left: Math.round((budget - spent)*100)/100,
+           daysLeft: Math.round((end - today) / 86400000) + 1,   // today counts
+           len, allow: len ? budget / len : 0, over: spent > budget };
+}
 /* Journal rides the same side channel as mood: `extra[k]` holds the text, `days[k]`
    holds 1. That 1 is not a placeholder - it is the honest value. Writing anything at
    all is the whole habit, so a journal day is worth exactly what a tick is worth, and
@@ -1026,6 +1105,21 @@ const moodBand = v => Math.max(0, Math.min(4, Math.floor((v - MOOD_MIN) / ((MOOD
 
 function bandFor(h){
   const days = h.days || {};
+  /* A spending day is measured against the daily allowance the budget implies, not
+     against your own recent form. Quintiles would repaint an expensive week green
+     simply because the week before it was worse, which is the opposite of what a
+     budget is for. Computed once here rather than per cell - budgetState walks the
+     whole period. */
+  if (isBudget(h)){
+    const allow = budgetState(h).allow;
+    return k => {
+      const v = days[k];
+      if (!allow || typeof v !== 'number') return 2;
+      if (v <= 0) return 4;                       // spent nothing: the best kind of day
+      const r = v / allow;
+      return r <= 0.5 ? 4 : r <= 1 ? 3 : r <= 1.5 ? 2 : r <= 2 ? 1 : 0;
+    };
+  }
   const q = quintiler(last21(h));
   const down = isDown(h);
   return k => {
@@ -1286,6 +1380,55 @@ window.bump = (id, k, delta) => {
   render();
 };
 
+/* Spending. The amount box is a real text field on a card, so it inherits the rule the
+   journal established in v56: while it holds focus nothing may re-render, because
+   replacing innerHTML under a focused input drops the Android keyboard and it cannot be
+   put back from code. Adding a spend is a deliberate button press, so the render happens
+   there, once, after the field is done with. */
+window.spendType = el => { spendDraft[el.dataset.h] = el.value; };
+window.addSpend = id => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const el = document.querySelector('.spendIn[data-h="'+id+'"]');
+  const raw = el ? el.value : (spendDraft[id] || '');
+  const v = Math.round(parseFloat(String(raw).replace(/[^0-9.\-]/g, '')) * 100) / 100;
+  if (!isFinite(v) || v === 0) return;            // an empty box is not a spend of nothing
+  const k = todayKey();
+  setSpend(h, k, spends(h, k).concat(v));
+  spendDraft[id] = '';
+  if (el) el.value = '';
+  jTyping = null;                                  // the field is done with; renders resume
+  save(); checkMilestones(); render();
+};
+// Spending nothing is an entry, not a blank. Without it the chain would break on the days
+// that went best, which would be a strange thing for a budget tracker to punish.
+window.spendNothing = id => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const k = todayKey();
+  if (has(h.days, k)) return;
+  setSpend(h, k, [0]);
+  jTyping = null;
+  save(); checkMilestones(); render();
+};
+window.addSpendTo = (id, k) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const el = document.querySelector('.spendIn[data-h="c'+id+'"]');
+  const v = Math.round(parseFloat(String(el ? el.value : '').replace(/[^0-9.\-]/g, '')) * 100) / 100;
+  if (!isFinite(v)) return;
+  setSpend(h, k, spends(h, k).concat(v));
+  jTyping = null;
+  save(); render();
+};
+window.dropSpend = (id, k) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const r = spends(h, k).slice(); r.pop();
+  setSpend(h, k, r);
+  save(); render();
+};
+
 /* Journal. The draft lives outside `data` until it is saved, so a half-typed thought
    never becomes a logged day, and closing the box without saving changes nothing. */
 window.openJournal = (id, k) => {
@@ -1447,6 +1590,7 @@ window.setDayNone = (id, k) => {
 
 window.setFormType = t => { grab(); form.type = t; if (t === 'time' && !form.dir) form.dir = 'up'; render(); };
 window.setFormDir  = d => { grab(); form.dir = d; render(); };
+window.setFormPeriod = v => { grab(); form.period = v; render(); };
 
 // Pause: excuse the next N days (from tomorrow — today can't be paused, so a
 // break is always deliberate). Excused days neither break nor extend a streak.
@@ -1493,6 +1637,7 @@ window.peekDay = (id, k) => {
    kind of rude. */
 let peekTimer = null;
 let moodDraft = {};        // slider positions, per card - not persisted
+let spendDraft = {};       // half-typed amounts, per card - not persisted
 let jrnl      = null;      // { id, key, text } - the PAST-day editor, opened from the calendar
 let jDraft    = {};        // habit id -> today's text as typed, survives a re-render
 let jFocus    = null;      // habit id whose box had focus, to restore after a render
@@ -1572,14 +1717,17 @@ window.doClearHist     = () => {
 };
 
 window.openNew = () => {
-  form = { name:'', cue:'', stack:'', minimum:'', type:'toggle', dir:'up' };
+  form = { name:'', cue:'', stack:'', minimum:'', type:'toggle', dir:'up',
+           budget:'', period:'week', pdays:7, cur:'R' };
   editing = 'new'; confirm = null; screen = 'manage'; render();
 };
 
 window.openEdit = id => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  form = { name:h.name, cue:h.cue||'', stack:h.stack||'', minimum:h.minimum||'', type:h.type||'toggle', dir:h.dir||'up' };
+  form = { name:h.name, cue:h.cue||'', stack:h.stack||'', minimum:h.minimum||'',
+           type:h.type||'toggle', dir:h.dir||'up',
+           budget:h.budget||'', period:h.period||'week', pdays:h.pdays||7, cur:h.cur||'R' };
   editing = id; confirm = null; clearHist = null; render();
 };
 
@@ -1607,6 +1755,16 @@ window.commit = () => {
     type:    form.type || 'toggle',
     dir:     form.dir || 'up'
   };
+  if (payload.type === 'budget'){
+    payload.budget = Math.max(0, +String(form.budget).replace(/[^0-9.]/g,'') || 0);
+    payload.period = form.period || 'week';
+    payload.pdays  = Math.max(1, Math.round(+form.pdays || 7));
+    payload.cur    = (String(form.cur || 'R').trim() || 'R').slice(0, 3);
+    // Anchors the custom cycle. Set once, on creation, so editing the budget later never
+    // slides the period boundaries out from under the days already logged.
+    const ex = (editing && editing !== 'new') ? data.habits.find(x => x.id === editing) : null;
+    payload.anchor = (ex && ex.anchor) || todayKey();
+  }
   if (editing === 'new'){
     data.habits.push({ id: Date.now(), days:{}, ...payload, mAt: Date.now() });
   } else {
@@ -1795,7 +1953,8 @@ window.importData = () => {
 // Keep in-progress form text across re-renders
 function grab(){
   const g = id => { const el = document.getElementById(id); return el ? el.value : null; };
-  const map = { fName:'name', fCue:'cue', fStack:'stack', fMin:'minimum' };
+  const map = { fName:'name', fCue:'cue', fStack:'stack', fMin:'minimum',
+                fBudget:'budget', fPdays:'pdays', fCur:'cur' };
   for (const [id,key] of Object.entries(map)){
     const v = g(id);
     if (v !== null) form[key] = v;
@@ -1853,11 +2012,15 @@ function peekValue(h, k){
   // Toggles and the score card carry their own answer already - a green block is
   // "done", and the score is printed on the bubble you just tapped. Repeating it adds
   // a word and no information, so these get the date alone.
+  if (isBudget(h)){
+    const v = h.days[k];
+    return typeof v === 'number' ? fmtMoney(h, v) : '';
+  }
   if (isJournal(h)){
     const w = wordCount(journalText(h, k));
     return w ? w+' word'+(w===1?'':'s') : '';
   }
-  if (!isTime(h) && !isCounter(h) && !isMood(h)) return '';
+  if (!isTime(h) && !isCounter(h) && !isMood(h) && !isBudget(h)) return '';
   if (!has(h.days, k))
     return (data.paused && data.paused[k]) ? 'paused' : 'not logged';
   const v = h.days[k];
@@ -1890,7 +2053,7 @@ function peekBubble(h, k, i, n){
 
 function chainStrip(h){
   const today = todayKey();
-  const counter = isCounter(h) || isJournal(h), col = counter ? counterScale(h) : null;
+  const counter = isCounter(h) || isJournal(h) || isBudget(h), col = counter ? counterScale(h) : null;
   const info = windowDays(N_DAYS).map(d => {
     const k = keyFor(d);
     return {
@@ -1992,7 +2155,8 @@ function fullGrid(h){
   const now = new Date(), today = todayKey();
   // Time habits are banded like counters here - the month grid is colour-only, so it
   // needs the good-to-less-good scale, not the toggle's flat green.
-  const graded = isCounter(h) || isTime(h) || isMood(h) || isJournal(h), col = graded ? counterScale(h) : null;
+  const graded = isCounter(h) || isTime(h) || isMood(h) || isJournal(h) || isBudget(h),
+        col = graded ? counterScale(h) : null;
 
   // Label the first column of each month. Suppress a label whose month is only a
   // narrow sliver at the left edge (fewer than 3 week-columns before the next month),
@@ -2065,6 +2229,16 @@ function dayChip(h){
         'onchange="setDayTime('+h.id+',\''+k+'\',this.value)">'+
       '<button class="chipBtn'+((v!==null&&v>=NONE_MIN)?' on':'')+'" onclick="setDayNone('+h.id+',\''+k+'\')">Didn’t happen</button>'+
       (logged ? '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
+  } else if (isBudget(h)){
+    const list = spends(h, k);
+    const tot  = list.length ? list.reduce((a,b)=>a+b,0) : null;
+    controls =
+      '<span class="chipNum"><span class="chipK">spent</span>'+
+        (tot === null ? '\u2014' : esc(fmtMoney(h, tot)))+'</span>'+
+      spendBox('c'+h.id, 'amount')+
+      '<button class="chipBtn" onclick="addSpendTo('+h.id+',\''+k+'\')">Add</button>'+
+      (list.length ? '<button class="chipBtn" onclick="dropSpend('+h.id+',\''+k+'\')">Undo one</button>'+
+        '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
   } else if (isJournal(h)){
     // The calendar is how you get back to what you wrote - that was the whole ask.
     const w = wordCount(journalText(h, k));
@@ -2274,6 +2448,72 @@ function journalRow(h, today){
     expBlock +
   '</div>';
 }
+
+/* The amount box, shared by the card and the day chip - each with its own key so the two
+   cannot fight over one draft while both are on screen. inputmode="decimal" gets the
+   number pad on a phone without type="number"'s spinners and locale grief. */
+function spendBox(key, ph){
+  return '<input class="spendIn" data-h="'+key+'" inputmode="decimal" '+
+    'value="'+esc(spendDraft[key] || '')+'" placeholder="'+esc(ph)+'" '+
+    'aria-label="Amount spent" onfocus="jTyping=this.dataset.h" oninput="spendType(this)">';
+}
+
+function budgetRow(h, today){
+  const open = expanded === h.id;
+  const st = budgetState(h);
+  const logged = has(h.days, today);
+  const s = statsFor(h);
+  const risk = rowRisk(h);
+  const warn = !logged && s.missed === 1, alarm = !logged && s.missed >= 2;
+  const cls = 'row' + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls +
+    (flashIds[h.id]?' undone':'') + (st.over?' overspent':'');
+
+  const dleft = Math.max(0, st.daysLeft);
+  const dtxt = dleft === 1 ? 'last day' : dleft + ' days to go';
+  const sub = !st.budget ? 'No budget set \u2014 edit the card to add one'
+    : st.over
+      ? '<span class="over">' + fmtMoney(h, -st.left) + ' over</span> \u00b7 ' + dtxt
+      : fmtMoney(h, st.left) + ' left \u00b7 ' + dtxt;
+
+  let expBlock = '';
+  if (open){
+    const details = [
+      h.cue     ? '<div class="detail"><div class="dk">When and where</div><div class="dv">'+esc(h.cue)+'</div></div>' : '',
+      h.stack   ? '<div class="detail"><div class="dk">Straight after</div><div class="dv">'+esc(h.stack)+'</div></div>' : '',
+      h.minimum ? '<div class="detail"><div class="dk">The floor</div><div class="dv">'+esc(h.minimum)+'</div></div>' : ''
+    ].join('');
+    const span = fmtDay(st.start) + ' \u2013 ' + fmtDay(st.end);
+    const statBlock =
+      '<div class="stats">'+
+        '<div><div class="sl">Spent</div><div class="sv">'+esc(fmtMoney(h, st.spent))+'</div></div>'+
+        '<div><div class="sl">'+(st.over?'Over':'Left')+'</div><div class="sv'+(st.over?' bad':'')+'">'+
+          esc(fmtMoney(h, Math.abs(st.left)))+'</div></div>'+
+        '<div><div class="sl">A day</div><div class="sv">'+esc(fmtMoney(h, st.allow))+'</div></div>'+
+      '</div>'+
+      '<div class="next">'+esc(span)+' \u00b7 '+esc(fmtMoney(h, st.budget))+' a '+
+        (h.period==='month'?'month':h.period==='days'?(st.len+' days'):'week')+'</div>';
+    expBlock = '<div class="exp">'+ details + fullGrid(h) + dayChip(h) + statBlock +
+      dayStatsBlock(h) + chainNote(h) + '</div>';
+  }
+
+  return '<div class="'+cls+'">'+
+    '<div class="top">'+
+      '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
+        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
+        '<div class="streak">'+sub+'</div>'+
+      '</button>'+
+      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
+        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+    '</div>'+
+    '<div class="bRow">'+
+      spendBox(String(h.id), ((h.cur||'R').trim()) + ' amount')+
+      '<button class="tNone bAdd" onclick="addSpend('+h.id+')">Add</button>'+
+      (logged ? '' : '<button class="chipBtn bNil" onclick="spendNothing('+h.id+')">Nothing today</button>')+
+    '</div>'+
+    riskBlock(risk) + chainStrip(h) + expBlock +
+  '</div>';
+}
+
 
 const MGH = 60;                    // taller than the time graph - this one draws a band
 function moodGraph(h){
@@ -3021,6 +3261,7 @@ function habitRow(h){
   if (isTime(h)) return timeRow(h, today);
   if (isMood(h)) return moodRow(h, today);
   if (isJournal(h)) return journalRow(h, today);
+  if (isBudget(h)) return budgetRow(h, today);
   if (isCounter(h)) return counterRow(h, today);
   const done  = !!h.days[today];
   const s     = statsFor(h);
@@ -3093,7 +3334,7 @@ function habitRow(h){
 
 // Values only mean something within a family, so switching families must drop history.
 const famOf = t => t==='score' ? 'score' : t==='time' ? 'time' : t==='mood' ? 'mood'
-  : t==='journal' ? 'journal'
+  : t==='journal' ? 'journal' : t==='budget' ? 'budget'
   : (t==='plus'||t==='minus'||t==='plusminus') ? 'counter' : 'toggle';
 
 // Which types can have a direction. Toggles and the score have nothing to rank.
@@ -3102,12 +3343,51 @@ const dirBtn = (d, label) =>
   '<button type="button" class="segBtn'+((form.dir||'up')===d?' on':'')+'" '+
     'onclick="setFormDir(\''+d+'\')">'+label+'</button>';
 
+const perBtn = (v, label) =>
+  '<button type="button" class="segBtn'+((form.period||'week')===v?' on':'')+'" '+
+    'onclick="setFormPeriod(\''+v+'\')">'+label+'</button>';
+
 const segBtn = (t, label) =>
   '<button type="button" class="segBtn'+((form.type||'toggle')===t?' on':'')+'" '+
     'onclick="setFormType(\''+t+'\')">'+label+'</button>';
 
+/* Only a budget needs these, so they appear only for a budget. A period is chosen rather
+   than typed because there are really only three answers, and two of them have a fixed
+   idea of where they start: Monday, and the 1st. */
+function budgetFields(){
+  const per = form.period || 'week';
+  return '<div class="fld">'+
+      '<label class="lbl" for="fBudget">Budget</label>'+
+      '<div class="bFld">'+
+        '<input id="fCur" class="curIn" value="'+esc(form.cur || 'R')+'" aria-label="Currency symbol">'+
+        '<input id="fBudget" inputmode="decimal" value="'+esc(form.budget || '')+'" placeholder="1000">'+
+      '</div>'+
+      '<p class="hint">The amount for one period. The card counts down from it.</p>'+
+    '</div>'+
+    '<div class="fld">'+
+      '<label class="lbl">Resets</label>'+
+      '<div class="picker">'+
+        perBtn('week','Weekly')+ perBtn('month','Monthly')+ perBtn('days','Every n days')+
+      '</div>'+
+      (per === 'days'
+        ? '<div class="bFld" style="margin-top:10px">'+
+            '<input id="fPdays" inputmode="numeric" value="'+esc(form.pdays || 7)+'" placeholder="14">'+
+            '<span class="bUnit">days</span>'+
+          '</div>'
+        : '')+
+      '<p class="hint">'+
+        (per === 'month' ? 'Starts on the 1st of each month.'
+         : per === 'days' ? 'Counted from the day this card was made, so the cycle stays fixed.'
+         : 'Starts every Monday.')+
+      '</p>'+
+    '</div>';
+}
+
 function typeHint(t){
-  return t==='journal' ? 'A box to write in. Anything at all counts — a sentence keeps '+
+  return t==='budget' ? 'An amount to spend over a period, and every spend logged against '+
+      'it. The card shows what is left and how long it has to last. Recording nothing '+
+      'spent still counts as recording.'
+    : t==='journal' ? 'A box to write in. Anything at all counts — a sentence keeps '+
       'the chain as surely as a page does. Past entries open from the calendar.'
     : t==='mood' ? 'A slider from 1 to 10, logged as often as you like in a day. '+
       'Several readings become a range, drawn as a band so a good morning and a bad '+
@@ -3120,7 +3400,8 @@ function typeHint(t){
     : 'A simple daily tick. Builds streaks, milestones and the warming background.';
 }
 
-const typeLabel = t => t==='journal' ? 'Journal'
+const typeLabel = t => t==='budget' ? 'Budget'
+  : t==='journal' ? 'Journal'
   : t==='mood' ? 'Mood · 1–10'
   : t==='plus' ? 'Counter · +'
   : t==='minus' ? 'Counter · −'
@@ -3137,6 +3418,7 @@ function editorHTML(title){
       '<div class="picker">'+
         segBtn('toggle','Tick')+ segBtn('plus','+')+ segBtn('minus','−')+ segBtn('plusminus','+/−')+
         segBtn('time','Time')+ segBtn('mood','Mood')+ segBtn('journal','Journal')+
+        segBtn('budget','Budget')+
         (allowScore ? segBtn('score','Score') : '')+
       '</div>'+
       '<p class="hint">'+typeHint(form.type)+'</p>'+
@@ -3148,7 +3430,8 @@ function editorHTML(title){
         dirBtn('up', form.type==='time' ? 'Later is better' : 'More is better')+
         dirBtn('down', form.type==='time' ? 'Earlier is better' : 'Less is better')+
       '</div>' : '')+
-    '</div>';
+    '</div>'+
+    (form.type === 'budget' ? budgetFields() : '');
 
   if (form.type === 'score'){                                // stripped editor - nothing to name/cue
     return '<div class="editor">'+
@@ -3313,7 +3596,9 @@ function render(){
   // Checked BEFORE the early return, not after: a guard whose textarea has gone (card
   // deleted, screen changed) would otherwise block every future render forever, and
   // the release check at the bottom of this function could never be reached to undo it.
-  if (jTyping !== null && !document.querySelector('.jInline[data-h="'+jTyping+'"]')) jTyping = null;
+  if (jTyping !== null &&
+      !document.querySelector('.jInline[data-h="'+jTyping+'"], .spendIn[data-h="'+jTyping+'"]'))
+    jTyping = null;
   if (jTyping !== null){ jPending = true; return; }
   _chainCache = {};                 // chain/point replay is per-render
   const tier = currentTier();

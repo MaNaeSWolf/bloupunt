@@ -1935,6 +1935,49 @@ projection line and keeps the rate. Flat data reads "holding steady" twice and t
 
 ---
 
+### 2026-08-21 (later) — The Budget card
+
+An amount, a period it has to last, and every spend logged against it. The collapsed card
+says what is left and how long it has to last; over budget it says so in clay and tints
+the whole card, which is hard to miss and hard to argue with.
+
+**Spending nothing writes a zero.** This is the design decision the card turns on. Without
+it a no-spend day leaves no record, and the chain would break on precisely the days that
+went best - a budget tracker punishing you for not spending. So "Nothing today" writes a
+0, `has()` counts it, and the streak keeps meaning what it means everywhere else here: you
+showed up and recorded. The habit is tracking, not thrift.
+
+**Third card on the `extra` side channel.** Several spends a day, so `extra[k]` holds the
+individual amounts and `days[k]` holds the day's total - the one number the calendars,
+chain, points and sync already understand. Mood, Journal and now Budget, all on the shape
+introduced in v51, and none of them needed the core touched.
+
+**Days are judged against the daily allowance**, not against your own recent form.
+Quintiles - right for every other card - would repaint an expensive week green merely
+because the week before was worse, which is the opposite of what a budget is for. The
+allowance is `budget / period length`, computed once per render rather than per cell.
+
+Periods start where people already think they start: Monday, or the 1st. A custom length
+counts from an anchor stamped at creation, so editing the amount later never slides the
+boundaries out from under days already logged. Verified against real dates: Sunday still
+belongs to the week that began on Monday, February resolves to 28 and 29 in the right
+years, and a 14-day cycle stays exactly 14 days long both after and before its anchor.
+
+**A lesson about my own checking.** `node --check` passed a line containing a stray `Q`
+left over from the patch script - an undefined identifier is valid syntax and only fails
+when the line runs. The period buttons were dead on arrival and the editor silently
+rendered without them. Syntax checking is not testing; the fix was to exercise every new
+entry point in a live page, which is now done explicitly and caught nothing else.
+
+Verified end to end: card built through the real editor; R1000 a week with mixed spends
+gives the right total, remainder, days to go and R142.86 a day; cents survive (R45.50);
+unparseable input is refused without touching the day and without wiping what was typed;
+going over flips the subtitle, the stat label and the card tint; a zero day earns a point;
+the chip adds, undoes one and clears a past day; switching to monthly recomputes the span
+and allowance. → `sw.js v68`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
