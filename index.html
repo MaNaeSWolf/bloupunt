@@ -504,7 +504,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v68';
+const BUILD = 'bloupunt-v69';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -2510,10 +2510,128 @@ function budgetRow(h, today){
       '<button class="tNone bAdd" onclick="addSpend('+h.id+')">Add</button>'+
       (logged ? '' : '<button class="chipBtn bNil" onclick="spendNothing('+h.id+')">Nothing today</button>')+
     '</div>'+
-    riskBlock(risk) + chainStrip(h) + expBlock +
+    riskBlock(risk) + budgetGraph(h) + expBlock +
   '</div>';
 }
 
+
+/* Twenty-one days, like every other strip on this screen, with two readings overlaid in
+   the same units.
+
+   BEHIND: the running total - but it RESETS at each period boundary, so three weeks of a
+   weekly budget read as a sawtooth. Each climb is one budget being spent and each drop is
+   the reset, which means the card shows how the last few cycles went rather than only the
+   one in progress. Sage while under, clay for whatever part is over, and the crossing
+   segment is split at the exact point it happens rather than coloured by whichever end
+   wins, because the day you went over is the day you will look for. A dashed rule marks
+   the budget: without it, an overspent cycle would just look like a normal one drawn
+   taller, since the scale has to grow to fit.
+
+   IN FRONT: one stem per day from zero to that day's total, with a dot at each spend along
+   the way. The dots are the individual spends and the gaps between them are how big each
+   one was - three climbing dots means three trips to the shop, one tall gap means a single
+   expensive afternoon. Dots alone would give the running position and lose the size of
+   each spend, which is why the stem stays.
+
+   The two layers keep SEPARATE scales, and that is a deliberate reversal. Sharing one
+   was the obvious idea and it failed on real data: against a cumulative total of R1225 a
+   normal R150 day is twelve percent of the height, so every stem collapsed into a five
+   pixel smudge along the floor and the thing the stems exist to show - how often you
+   spent, and how the amounts compare - was unreadable. The cumulative line answers "how
+   much of the budget is gone"; the stems answer "what did the days look like". Those are
+   different questions and they deserve different rulers. The stems run against the
+   biggest single day in the window, so the shape of a week is legible whether the budget
+   is R500 or R50,000. */
+const BGH = 62, BPAD = 8;
+function budgetGraph(h){
+  const st = budgetState(h);
+  const end = midnight(), today = todayKey();
+  const days = windowDays(N_DAYS);
+  const n = N_DAYS;
+
+  let run = 0, curStart = null;
+  const info = days.map(d => {
+    const k = keyFor(d);
+    const ps = keyFor(budgetPeriod(h, d).start);
+    const fresh = ps !== curStart;
+    if (fresh){ curStart = ps; run = 0; }
+    const tot = typeof (h.days||{})[k] === 'number' ? h.days[k] : null;
+    if (tot !== null) run += tot;
+    return { k, list: spends(h, k), tot, run, fresh, future: d > end,
+             today: k === today, sel: !!(daySel && daySel.id === h.id && daySel.key === k) };
+  });
+
+  const peak = info.reduce((m, x) => (x.tot !== null && x.run > m) ? x.run : m, 0);
+  const top  = Math.max(st.budget, peak, 1);
+  const yOf  = v => BGH - BPAD - (Math.max(0, v) / top) * (BGH - BPAD * 2);
+  // The stems' own ruler: the biggest single day in the window reaches full height.
+  const dayTop = Math.max(1, info.reduce((m, x) => (x.tot > m ? x.tot : m), 0));
+  const yDay = v => BGH - BPAD - (Math.max(0, v) / dayTop) * (BGH - BPAD * 2);
+  const xOf  = i => ((i + 0.5) / n) * 100;
+  const px   = i => xOf(i).toFixed(2) + '%';
+  const base = yOf(0), yB = yOf(st.budget);
+
+  // Where each cycle restarts, so the sawtooth is read as cycles rather than a stumble.
+  const marks = info.map((x, i) => (x.fresh && i > 0)
+    ? '<line x1="'+((i / n) * 100).toFixed(2)+'%" y1="'+BPAD+'" x2="'+((i / n) * 100).toFixed(2)+
+      '%" y2="'+(BGH - BPAD)+'" stroke="var(--hair)" stroke-width="1"/>' : '').join('');
+
+  const rule = st.budget > 0
+    ? '<line x1="0" y1="'+yB.toFixed(1)+'" x2="100%" y2="'+yB.toFixed(1)+
+      '" stroke="'+(peak > st.budget ? 'var(--clay)' : 'var(--faint)')+
+      '" stroke-width="1" stroke-dasharray="3 3" opacity="'+(peak > st.budget ? '.6' : '.9')+'"/>'
+    : '';
+
+  const seg = (x1, y1, x2, y2, col) =>
+    '<line x1="'+x1+'" y1="'+y1.toFixed(1)+'" x2="'+x2+'" y2="'+y2.toFixed(1)+
+    '" stroke="'+col+'" stroke-width="2" stroke-linecap="round" opacity=".75"/>';
+  const over = v => st.budget > 0 && v > st.budget;
+
+  let line = '';
+  for (let i = 0; i + 1 < info.length; i++){
+    const a = info[i], b = info[i+1];
+    if (a.tot === null || b.tot === null || b.future) continue;
+    if (b.fresh) continue;                       // a new cycle starts from zero, not from here
+    if (over(a.run) !== over(b.run)){
+      const f  = (st.budget - a.run) / (b.run - a.run);
+      const xc = (xOf(i) + (xOf(i+1) - xOf(i)) * f).toFixed(2) + '%';
+      line += seg(px(i), yOf(a.run), xc, yB, over(a.run) ? 'var(--clay)' : 'var(--sageDeep)');
+      line += seg(xc, yB, px(i+1), yOf(b.run), over(b.run) ? 'var(--clay)' : 'var(--sageDeep)');
+    } else {
+      line += seg(px(i), yOf(a.run), px(i+1), yOf(b.run),
+                  over(b.run) ? 'var(--clay)' : 'var(--sageDeep)');
+    }
+  }
+
+  const band = bandFor(h);
+  const bars = info.map((x, i) => {
+    const cx = px(i);
+    const act = 'peekDay('+h.id+',\''+x.k+'\')';
+    const hit = '<rect x="'+((i / n) * 100).toFixed(2)+'%" y="0" width="'+(100 / n).toFixed(2)+
+      '%" height="'+BGH+'" fill="transparent" style="cursor:pointer" role="button" tabindex="0" '+
+      'aria-label="'+x.k+(x.tot === null ? ', not logged' : ', '+fmtMoney(h, x.tot))+'" '+
+      'onclick="'+act+'"></rect>';
+    const dot = (y, r) => '<circle cx="'+cx+'" cy="'+y.toFixed(1)+'" r="'+r+
+      '" fill="'+bandColourIdx(band(x.k))+'" stroke="'+(x.sel ? 'var(--ink)' : 'rgba(61,59,55,.28)')+
+      '" stroke-width="'+(x.sel ? 2 : 1)+'"/>';
+    if (x.tot === null)
+      return (x.future ? '' : '<circle cx="'+cx+'" cy="'+base.toFixed(1)+
+        '" r="1.4" fill="var(--hair)"/>') + hit;
+    // Spent nothing: a dot on the floor, so the best kind of day still shows as recorded.
+    if (!x.list.length || x.tot === 0) return dot(base, x.sel ? 3.4 : 2.6) + hit;
+    const stem = '<line x1="'+cx+'" y1="'+base.toFixed(1)+'" x2="'+cx+'" y2="'+
+      yDay(x.tot).toFixed(1)+'" stroke="var(--faint)" stroke-width="'+(x.sel ? 3 : 2)+
+      '" stroke-linecap="round"/>';
+    let c = 0;
+    const dots = x.list.map(v => { c += v; return dot(yDay(c), x.sel ? 3.4 : 2.6); }).join('');
+    return stem + dots + hit;
+  }).join('');
+
+  const pi = (daySel && daySel.id === h.id) ? info.findIndex(x => x.k === daySel.key) : -1;
+  const pk = pi >= 0 ? peekBubble(h, daySel.key, pi, n) : '';
+  return '<div class="tgraph">'+pk+
+    '<svg width="100%" height="'+BGH+'">'+ marks + rule + line + bars +'</svg></div>';
+}
 
 const MGH = 60;                    // taller than the time graph - this one draws a band
 function moodGraph(h){
@@ -3460,6 +3578,11 @@ function editorHTML(title){
         '" autofocus>'+
     '</div>'+
     seg +
+    /* Cue, anchor and floor are the Atomic Habits scaffolding for something you DO. A
+       budget is a number you spend against: there is no time and place at which it
+       happens, and no smallest version that still counts. Three fields that make no
+       sense for the card in front of you are worse than none. */
+    (form.type === 'budget' ? '' :
     '<div class="fld">'+
       '<label class="lbl" for="fCue">When and where <span class="opt">\u00b7 optional</span></label>'+
       '<input id="fCue" value="'+esc(form.cue)+'" placeholder="At 9pm, in the bedroom">'+
@@ -3474,7 +3597,7 @@ function editorHTML(title){
       '<label class="lbl" for="fMin">The floor <span class="opt">\u00b7 optional</span></label>'+
       '<input id="fMin" value="'+esc(form.minimum)+'" placeholder="One page">'+
       '<p class="hint">The smallest version that still counts. Offered back after two missed days.</p>'+
-    '</div>'+
+    '</div>')+
     '<div class="acts">'+
       '<button class="btnP" onclick="commit()">Save</button>'+
       '<button class="btnG" onclick="cancelEdit()">Cancel</button>'+

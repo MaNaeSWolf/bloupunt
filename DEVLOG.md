@@ -1978,6 +1978,52 @@ and allowance. → `sw.js v68`.
 
 ---
 
+### 2026-08-21 (later) — The budget strip
+
+The budget card was borrowing the ordinary week strip, which could only say "a day was
+logged". Now it draws its own, still twenty-one days wide and in the same visual language
+as the time and mood graphs, with two readings overlaid.
+
+**Behind: the running total, resetting at every period boundary.** This was the better
+idea and it was not mine - anchoring on the current period only would have shown the cycle
+in progress and nothing else. Resetting instead turns three weeks into a sawtooth: each
+climb is one budget being spent, each drop is the reset, and you can see how the last few
+cycles actually went. Sage under, clay over, and the crossing segment is split at the
+exact point it happens rather than coloured by whichever end wins - the day you went over
+is the day you will look for. Faint verticals mark where each cycle restarts, and a dashed
+rule marks the budget itself, which becomes essential once the scale has to grow past it:
+without it an overspent cycle would look like an ordinary one drawn slightly taller.
+
+**In front: one stem per day, with a dot at each spend.** The dots are the individual
+spends and the gaps between them are how big each one was - three climbing dots is three
+trips to the shop, one tall gap is a single expensive afternoon. That answers the "do we
+need the line or just the dot" question: dots alone give the running position and lose the
+size of each spend, so the stem stays.
+
+**The two layers keep separate scales, which reverses what I built first.** Sharing one
+was the obvious move and it failed on real data: against a cumulative R1225 a normal R150
+day is twelve percent of the height, so every stem collapsed into a five-pixel smudge and
+the layer's entire purpose was unreadable. The line answers "how much of the budget is
+gone"; the stems answer "what did the days look like". Different questions, different
+rulers. Stems now run against the biggest single day in the window, so a week has shape
+whether the budget is R500 or R50,000.
+
+The editor also drops **When and where**, **Straight after** and **The floor** for a
+budget. Those are the Atomic Habits scaffolding for something you DO; a budget is a number
+you spend against, with no time and place at which it happens and no smallest version that
+still counts.
+
+**And the same self-inflicted bug, twice in one day.** A Python placeholder from the patch
+script reached the shipped JavaScript as a bare identifier - `Q` in v68, `QU` here - both
+times from inside a triple-quoted block where `+ QU +` is only text. `node --check` passes
+it every time, because an undefined identifier is valid syntax until the line runs. The
+ship script now greps the script block for those names and refuses to build if it finds
+one. Verified: every budget entry point exercised in a live page, no uncaught errors, 3
+cycle boundaries, 2 clay segments where the blown week crossed R1000, 16 stems and 26 dots
+against 21 spends and 5 zero-days. → `sw.js v69`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
