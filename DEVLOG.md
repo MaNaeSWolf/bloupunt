@@ -2024,6 +2024,93 @@ against 21 spends and 5 zero-days. → `sw.js v69`.
 
 ---
 
+### 2026-08-21 (later) — A card that froze, and a note to whoever patches this next
+
+#### The patch-script trap — read this before editing index.html
+
+This file is edited by Python scripts that do literal string replacement. Twice in one day
+a **Python variable name reached the shipped JavaScript as a bare identifier**, and both
+times it shipped green.
+
+What happens: a helper is defined in the script, say `QU = chr(92) + "'"`, to write an
+escaped quote. Used in a normal concatenation it works:
+
+    "onclick=\"peekDay(" + QU + "'+k+'" + QU + ")\""
+
+Used inside a **triple-quoted block** it does not, because there is no concatenation there
+at all - `+ QU +` is simply five characters of text:
+
+    sub("anchor", """...
+        const act = 'peekDay('+h.id+',' + QU + "'+x.k+'" + QU + ')';
+    ...""", "label")
+
+The file then contains `... + QU + ...` as live JavaScript. **`node --check` passes it**,
+because an undefined identifier is perfectly valid syntax - it only throws when that line
+actually executes. So the syntax gate is green, the deploy is green, and the feature is
+dead on arrival: in v68 the period buttons never rendered, in v69 the whole budget graph
+threw on first paint.
+
+**What to look for:**
+
+- A bare `Q`, `QU`, `BS`, `DOT` - or any short capitalised token - sitting in the JS where
+  a quote or backslash was meant to be.
+- Symptoms: a feature that renders nothing at all while everything around it is fine, or a
+  `ReferenceError: X is not defined` in the console pointing at a line you just wrote.
+- It cannot be caught by reading the patch script; it looks correct there. Read the
+  **output**.
+
+**What now prevents it:** the ship script greps the `<script>` block for those names as
+whole words and refuses to build if it finds one. That guard is in every ship script from
+v69 on - keep it. And the broader rule it belongs to: **a syntax check is not a test.**
+Every new entry point gets called once in a live page before shipping. That is what caught
+both of these, and it is cheap.
+
+Related and worth the same caution: writing patch scripts through a bash heredoc mangles
+backslashes, which is how a NUL byte got into this file in v50. Patch scripts go through a
+file, never a heredoc.
+
+#### The frozen card
+
+Reported: while editing a past day in the calendar, nothing worked. The card would not
+collapse, other cards would not open, and the only thing that still functioned was adding
+an amount.
+
+Exactly diagnosable. `spendBox` sets the no-render guard on focus - `jTyping = data-h` -
+and the guard was only ever given back by `Add`. The journal textarea has had
+`onblur="jLeave(this)"` since v56 precisely for this; the amount box was written with the
+focus half and not the release half. So touching it deferred every subsequent render
+forever, and `Add` appeared to be the one working control because it clears the guard and
+renders on its way out. `spendBlur` now releases it and runs whatever render was waiting,
+deferred a tick so a tap on another control lands before the DOM is replaced.
+
+**This very likely explains the unreproducible "big black circle" too.** With renders
+frozen, the page keeps showing whatever it was showing when the guard was taken - stale
+selection marks included - and a refresh clears it, which is exactly what was described.
+Not certain, but the mechanism fits and there is no second candidate.
+
+#### The rest
+
+- **A zero stops being true when a real spend lands.** "Nothing today" wrote a 0, and a
+  later spend appended to it, leaving a dot on the floor claiming a spend of nothing that
+  never happened. The zero is dropped as soon as a real amount arrives; a lone zero still
+  stands, because that is the day going as planned.
+- **A gap no longer breaks the cumulative line.** It stepped day by day and gave up at the
+  first blank, so an unlogged day cut the curve into fragments. It now joins consecutive
+  **logged** days, testing the period id rather than "is this a period start", so a gap is
+  bridged while a cycle boundary still restarts from zero.
+- **Each dot is coloured by its own amount**, ranked against every individual spend in the
+  window - so R1000 and R100 on the same afternoon no longer look alike. The calendar
+  still colours by the day's total against the daily allowance, which is a different
+  question and the right one there. Note the five-band limit: the top fifth of spends all
+  share the amber band, so R300 and R1000 can match. That is how every card here colours.
+- **Period boundary rules removed**, and the part of a stem above that day's share of the
+  budget is drawn in clay instead. With a one-day period the allowance IS the budget,
+  which is the case the sawtooth cannot describe - a cycle that resets daily never draws a
+  line - so the stems carry that reading themselves, and it stays meaningful at any
+  length. → `sw.js v70`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it

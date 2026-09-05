@@ -504,7 +504,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v69';
+const BUILD = 'bloupunt-v70';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -853,8 +853,14 @@ const spends    = (h, k) => { const a = (h.extra||{})[k]; return Array.isArray(a
 function setSpend(h, k, list){
   h.extra = h.extra || {};
   if (!list.length){ delete h.extra[k]; delete h.days[k]; return; }
-  h.extra[k] = list.slice();
-  h.days[k]  = Math.round(list.reduce((a,b)=>a+b,0) * 100) / 100;
+  /* "Nothing today" is a claim about the whole day, and a late McFlurry falsifies it. The
+     zero is dropped as soon as a real amount lands, rather than left sitting on the floor
+     of the graph as a dot claiming a spend of nothing that never happened. A lone zero
+     still stands - that is the day going as planned. */
+  const real = list.filter(v => v !== 0);
+  const use  = real.length ? real : [0];
+  h.extra[k] = use;
+  h.days[k]  = Math.round(use.reduce((a,b)=>a+b,0) * 100) / 100;
 }
 // Whole numbers stay whole; cents appear only when there are cents to show.
 function fmtMoney(h, v){
@@ -1386,6 +1392,19 @@ window.bump = (id, k, delta) => {
    put back from code. Adding a spend is a deliberate button press, so the render happens
    there, once, after the field is done with. */
 window.spendType = el => { spendDraft[el.dataset.h] = el.value; };
+/* Without this the card froze. Focusing the amount box takes the no-render guard, and
+   only `Add` ever gave it back - so after tapping the box in the day chip you could not
+   collapse the card, open another, or do anything except add an amount, because every
+   render was being deferred and never released. The journal textarea has always had its
+   blur handler; this field was written with the focus half and not the release half.
+   Deferred a tick for the same reason as everywhere else: a tap on another control fires
+   this blur first, and re-rendering here would pull that control out of the DOM before
+   its own click could land. */
+window.spendBlur = el => {
+  if (!el.isConnected) return;              // a render tore it down; not a real blur
+  if (jTyping === el.dataset.h) jTyping = null;
+  if (jPending){ jPending = false; setTimeout(() => { if (jTyping === null) render(); }, 0); }
+};
 window.addSpend = id => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
@@ -2455,7 +2474,8 @@ function journalRow(h, today){
 function spendBox(key, ph){
   return '<input class="spendIn" data-h="'+key+'" inputmode="decimal" '+
     'value="'+esc(spendDraft[key] || '')+'" placeholder="'+esc(ph)+'" '+
-    'aria-label="Amount spent" onfocus="jTyping=this.dataset.h" oninput="spendType(this)">';
+    'aria-label="Amount spent" onfocus="jTyping=this.dataset.h" oninput="spendType(this)" '+
+    'onblur="spendBlur(this)">';
 }
 
 function budgetRow(h, today){
@@ -2542,6 +2562,20 @@ function budgetRow(h, today){
    different questions and they deserve different rulers. The stems run against the
    biggest single day in the window, so the shape of a week is legible whether the budget
    is R500 or R50,000. */
+/* A dot is one spend, so it is coloured by what THAT spend was - not by the day's total.
+   Two trips in an afternoon, R1000 and then R100, should not be the same colour: the
+   thousand is the one worth seeing. Ranked against every individual spend in the window,
+   so the biggest single amount of the last three weeks sits at the amber end and an
+   ordinary one sits mid-scale. The calendar still colours by the day's TOTAL against the
+   daily allowance, which is the right question there and a different one. */
+function spendScale(h){
+  const vals = [];
+  for (const d of windowDays(N_DAYS))
+    for (const v of spends(h, keyFor(d))) if (v > 0) vals.push(v);
+  const q = quintiler(vals);
+  return v => v <= 0 ? 4 : 4 - q(v);        // more spent, further toward amber
+}
+
 const BGH = 62, BPAD = 8;
 function budgetGraph(h){
   const st = budgetState(h);
@@ -2557,7 +2591,7 @@ function budgetGraph(h){
     if (fresh){ curStart = ps; run = 0; }
     const tot = typeof (h.days||{})[k] === 'number' ? h.days[k] : null;
     if (tot !== null) run += tot;
-    return { k, list: spends(h, k), tot, run, fresh, future: d > end,
+    return { k, ps, list: spends(h, k), tot, run, fresh, future: d > end,
              today: k === today, sel: !!(daySel && daySel.id === h.id && daySel.key === k) };
   });
 
@@ -2571,11 +2605,6 @@ function budgetGraph(h){
   const px   = i => xOf(i).toFixed(2) + '%';
   const base = yOf(0), yB = yOf(st.budget);
 
-  // Where each cycle restarts, so the sawtooth is read as cycles rather than a stumble.
-  const marks = info.map((x, i) => (x.fresh && i > 0)
-    ? '<line x1="'+((i / n) * 100).toFixed(2)+'%" y1="'+BPAD+'" x2="'+((i / n) * 100).toFixed(2)+
-      '%" y2="'+(BGH - BPAD)+'" stroke="var(--hair)" stroke-width="1"/>' : '').join('');
-
   const rule = st.budget > 0
     ? '<line x1="0" y1="'+yB.toFixed(1)+'" x2="100%" y2="'+yB.toFixed(1)+
       '" stroke="'+(peak > st.budget ? 'var(--clay)' : 'var(--faint)')+
@@ -2587,23 +2616,30 @@ function budgetGraph(h){
     '" stroke="'+col+'" stroke-width="2" stroke-linecap="round" opacity=".75"/>';
   const over = v => st.budget > 0 && v > st.budget;
 
+  /* Joins consecutive LOGGED days, not adjacent ones. A day you did not record leaves the
+     running total exactly where it was, so the line should carry straight across it -
+     stepping day by day and giving up at the first blank turned the curve into
+     disconnected fragments. Cycles still never join: a new period starts from zero, so
+     the line restarts rather than spanning, which is why the test is the period id and
+     not merely "is this the first day of one". */
   let line = '';
-  for (let i = 0; i + 1 < info.length; i++){
-    const a = info[i], b = info[i+1];
-    if (a.tot === null || b.tot === null || b.future) continue;
-    if (b.fresh) continue;                       // a new cycle starts from zero, not from here
+  const pts = info.map((x, i) => (x.tot !== null && !x.future) ? i : -1).filter(i => i >= 0);
+  for (let m = 0; m + 1 < pts.length; m++){
+    const i = pts[m], j = pts[m+1];
+    const a = info[i], b = info[j];
+    if (a.ps !== b.ps) continue;
     if (over(a.run) !== over(b.run)){
       const f  = (st.budget - a.run) / (b.run - a.run);
-      const xc = (xOf(i) + (xOf(i+1) - xOf(i)) * f).toFixed(2) + '%';
+      const xc = (xOf(i) + (xOf(j) - xOf(i)) * f).toFixed(2) + '%';
       line += seg(px(i), yOf(a.run), xc, yB, over(a.run) ? 'var(--clay)' : 'var(--sageDeep)');
-      line += seg(xc, yB, px(i+1), yOf(b.run), over(b.run) ? 'var(--clay)' : 'var(--sageDeep)');
+      line += seg(xc, yB, px(j), yOf(b.run), over(b.run) ? 'var(--clay)' : 'var(--sageDeep)');
     } else {
-      line += seg(px(i), yOf(a.run), px(i+1), yOf(b.run),
+      line += seg(px(i), yOf(a.run), px(j), yOf(b.run),
                   over(b.run) ? 'var(--clay)' : 'var(--sageDeep)');
     }
   }
 
-  const band = bandFor(h);
+  const band = spendScale(h);
   const bars = info.map((x, i) => {
     const cx = px(i);
     const act = 'peekDay('+h.id+',\''+x.k+'\')';
@@ -2611,26 +2647,35 @@ function budgetGraph(h){
       '%" height="'+BGH+'" fill="transparent" style="cursor:pointer" role="button" tabindex="0" '+
       'aria-label="'+x.k+(x.tot === null ? ', not logged' : ', '+fmtMoney(h, x.tot))+'" '+
       'onclick="'+act+'"></rect>';
-    const dot = (y, r) => '<circle cx="'+cx+'" cy="'+y.toFixed(1)+'" r="'+r+
-      '" fill="'+bandColourIdx(band(x.k))+'" stroke="'+(x.sel ? 'var(--ink)' : 'rgba(61,59,55,.28)')+
+    const dot = (y, r, v) => '<circle cx="'+cx+'" cy="'+y.toFixed(1)+'" r="'+r+
+      '" fill="'+bandColourIdx(band(v))+'" stroke="'+(x.sel ? 'var(--ink)' : 'rgba(61,59,55,.28)')+
       '" stroke-width="'+(x.sel ? 2 : 1)+'"/>';
     if (x.tot === null)
       return (x.future ? '' : '<circle cx="'+cx+'" cy="'+base.toFixed(1)+
         '" r="1.4" fill="var(--hair)"/>') + hit;
     // Spent nothing: a dot on the floor, so the best kind of day still shows as recorded.
-    if (!x.list.length || x.tot === 0) return dot(base, x.sel ? 3.4 : 2.6) + hit;
-    const stem = '<line x1="'+cx+'" y1="'+base.toFixed(1)+'" x2="'+cx+'" y2="'+
-      yDay(x.tot).toFixed(1)+'" stroke="var(--faint)" stroke-width="'+(x.sel ? 3 : 2)+
+    if (!x.list.length || x.tot === 0) return dot(base, x.sel ? 3.4 : 2.6, 0) + hit;
+    /* The part of a day that went past its share of the budget is drawn in clay. With a
+       one-day period the allowance IS the budget, which is the case the sawtooth cannot
+       describe - a period that resets every day never draws a line at all - so the stems
+       have to carry that reading themselves. It stays meaningful at any length: this day
+       ate more than its share, and here is how much more. */
+    const yTop = yDay(x.tot), yA = yDay(st.allow);
+    const bar = (y1, y2, col) => '<line x1="'+cx+'" y1="'+y1.toFixed(1)+'" x2="'+cx+'" y2="'+
+      y2.toFixed(1)+'" stroke="'+col+'" stroke-width="'+(x.sel ? 3 : 2)+
       '" stroke-linecap="round"/>';
+    const over = st.allow > 0 && yTop < yA;
+    const stem = bar(base, over ? yA : yTop, 'var(--faint)') +
+                 (over ? bar(yA, yTop, 'var(--clay)') : '');
     let c = 0;
-    const dots = x.list.map(v => { c += v; return dot(yDay(c), x.sel ? 3.4 : 2.6); }).join('');
+    const dots = x.list.map(v => { c += v; return dot(yDay(c), x.sel ? 3.4 : 2.6, v); }).join('');
     return stem + dots + hit;
   }).join('');
 
   const pi = (daySel && daySel.id === h.id) ? info.findIndex(x => x.k === daySel.key) : -1;
   const pk = pi >= 0 ? peekBubble(h, daySel.key, pi, n) : '';
   return '<div class="tgraph">'+pk+
-    '<svg width="100%" height="'+BGH+'">'+ marks + rule + line + bars +'</svg></div>';
+    '<svg width="100%" height="'+BGH+'">'+ rule + line + bars +'</svg></div>';
 }
 
 const MGH = 60;                    // taller than the time graph - this one draws a band
