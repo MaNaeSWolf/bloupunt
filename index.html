@@ -522,7 +522,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v72';
+const BUILD = 'bloupunt-v73';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -3794,15 +3794,19 @@ function dowFields(){
 function budgetFields(){
   const per = form.period || 'week';
   const hrs = form.type === 'hours';
+  /* The period is a permanent part of these settings, not something that appears once a
+     target has been typed. It was conditional on `form.target` being non-empty - and
+     nothing re-renders while a text field has focus, by design since v56, so that
+     condition could never flip and the control was simply unreachable. An amount and how
+     often to reach it are one idea anyway, and they now read as one: Target 40h, per Week. */
   if (hrs) return '<div class="fld">'+
       '<label class="lbl" for="fTarget">Target <span class="opt">\u00b7 optional</span></label>'+
       '<input id="fTarget" value="'+esc(form.target || '')+'" placeholder="40h">'+
-      '<p class="hint">How much to reach in one period \u2014 40h, 2h30, 90m. Leave it empty '+
-        'to just keep the log, and the card drops the target graph entirely.</p>'+
+      '<p class="hint">How much to reach in one period \u2014 40h, 2h30, 90m. Leave it empty to '+
+        'just keep the log, and the card drops the target graph entirely.</p>'+
     '</div>'+
-    (String(form.target||'').trim() ? periodFields(per, 'Counted from the day this card '+
-      'was made, so the cycle stays fixed.') : '')+
-    '';
+    periodFields(per, 'Counted from the day this card was made, so the cycle stays fixed.',
+                 'Per', ['Week','Month','n days']);
   return '<div class="fld">'+
       '<label class="lbl" for="fBudget">Budget</label>'+
       '<div class="bFld">'+
@@ -3815,11 +3819,12 @@ function budgetFields(){
 }
 
 // Shared by both cycle cards - the reset rule is the same question either way.
-function periodFields(per, daysHint){
+function periodFields(per, daysHint, label, labels){
+  const L = labels || ['Weekly','Monthly','Every n days'];
   return '<div class="fld">'+
-      '<label class="lbl">Resets</label>'+
+      '<label class="lbl">'+(label || 'Resets')+'</label>'+
       '<div class="picker">'+
-        perBtn('week','Weekly')+ perBtn('month','Monthly')+ perBtn('days','Every n days')+
+        perBtn('week',L[0])+ perBtn('month',L[1])+ perBtn('days',L[2])+
       '</div>'+
       (per === 'days'
         ? '<div class="bFld" style="margin-top:10px">'+
@@ -3828,9 +3833,9 @@ function periodFields(per, daysHint){
           '</div>'
         : '')+
       '<p class="hint">'+
-        (per === 'month' ? 'Starts on the 1st of each month.'
+        (per === 'month' ? 'Runs from the 1st of each month.'
          : per === 'days' ? daysHint
-         : 'Starts every Monday.')+
+         : 'Runs Monday to Sunday.')+
       '</p>'+
     '</div>';
 }

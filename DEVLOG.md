@@ -2213,6 +2213,36 @@ reason Budget did in v69. → `sw.js v72`.
 
 ---
 
+### 2026-08-21 (later) — A control nobody could reach
+
+The Hours target had no period selector. Reported as removed; it was never removed. It was
+written to appear only once the target field held something:
+
+    (String(form.target||'').trim() ? periodFields(...) : '')
+
+Which cannot happen. **Nothing re-renders while a text field has focus** — deliberately,
+since v56, because a render under a focused input drops the Android keyboard and it cannot
+be restored from code. So typing "40h" changes the DOM value and nothing else, the
+condition never re-evaluates, and the control never appears. Blur it and the next render
+would show it, but by then you have moved on. It was unreachable in practice.
+
+Worth naming the shape of this, because the ingredients are common enough to meet again:
+**conditional UI whose condition depends on an input the render loop is forbidden from
+watching.** The condition was correct, the guard was correct, and together they were a
+control that did not exist.
+
+It is a permanent field now, which it should have been anyway — an amount and how often to
+reach it are one idea, and they now read as one: **Target 40h, Per Week**. The Budget card
+keeps its own wording ("Resets", "Weekly/Monthly/Every n days") since a budget resets
+rather than recurs; `periodFields` takes both as arguments.
+
+Verified across all three shapes and both directions: the selector is present with the
+target box still empty; 40h a week gives a 7-day period at 5h 43m a day; 200h a month
+gives 30 days at 6h 40m; 60h every 10 days keeps a 10-day cycle; and reopening a saved
+card brings back its target and its period already selected. → `sw.js v73`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
