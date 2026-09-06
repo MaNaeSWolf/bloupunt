@@ -255,6 +255,10 @@
   .jBox::placeholder{color:#BFB9B0}
   .jActs{display:flex;gap:10px;margin-top:10px}
   .bRow{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
+  .hmBox{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0}
+  .hmBox .hm{flex:1 1 40px;min-width:0;text-align:center}
+  .hmU{flex:0 0 auto;font-size:13px;color:var(--soft)}
+  .chip .hmBox{flex:1 1 130px}
   .spendIn{flex:1 1 90px;min-width:0;background:var(--bg);border:1px solid var(--faint);
     border-radius:10px;padding:9px 11px;font-family:inherit;font-size:14px;color:var(--ink)}
   .spendIn:focus{outline:none;border-color:var(--sage);background:var(--card)}
@@ -265,6 +269,10 @@
   .streak .over{color:var(--clay);font-weight:600}
   .streak .hit{color:var(--sageDeep);font-weight:600}
   .sv.bad{color:var(--clay)}
+  .dowPick{display:flex;gap:5px}
+  .dowBtn{flex:1;min-width:0;background:var(--bg);border:1px solid var(--faint);
+    color:var(--soft);padding:9px 0;font-size:12.5px;font-weight:500;border-radius:9px}
+  .dowBtn.on{background:var(--sage);border-color:var(--sage);color:#fff}
   .kinds{display:flex;flex-direction:column;gap:7px}
   .kind{display:block;width:100%;text-align:left;background:var(--bg);
     border:1px solid var(--faint);border-radius:12px;padding:11px 14px}
@@ -514,7 +522,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v71';
+const BUILD = 'bloupunt-v72';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -857,6 +865,20 @@ const isHours   = h => h.type === 'hours';
    better, so every colour decision is the mirror of the budget's. */
 const isCycle   = h => isBudget(h) || isHours(h);
 
+/* Days a card does not apply to. A weekday habit should not be accused of missing every
+   Saturday, and its streak should not die on Friday night. `dows` is seven flags starting
+   Monday, matching the (getDay()+6)%7 convention used everywhere here; absent means all
+   seven, so every card that existed before this keeps behaving exactly as it did.
+
+   These are treated as PAUSED days rather than as a new concept - neither building a run
+   nor breaking one - because that machinery already exists, is already correct, and is
+   already understood by chainRun, statsFor and the weekday stats. */
+const dowOff = (h, k) => {
+  const a = h.dows;
+  if (!a || a.length !== 7) return false;
+  return !a[(parseKey(k).getDay() + 6) % 7];
+};
+
 /* Budget rides the same side channel as mood: several amounts a day, so `extra[k]` holds
    the individual spends and `days[k]` holds the day's TOTAL - the one number every other
    part of the app already knows how to read.
@@ -1071,6 +1093,8 @@ function avg7(h, d){
 function unloggedShade(h, d){
   const k = keyFor(d);
   if ((data.paused || {})[k]) return PAUSED_FILL;
+  // Not a miss and not a pause - this card simply does not run today.
+  if (dowOff(h, k)) return LEV[0];
   const start = habitStart(h);
   if (start && d < start) return LEV[0];
   if (d >= midnight()) return LEV[0];
@@ -1236,7 +1260,7 @@ function chainRun(h){
         while (lvl + 1 < TIER_DAYS.length && run >= TIER_DAYS[lvl+1]) lvl++;
         points[k] = lvl + 1;
       }
-      else if (paused[k]){ /* bridges: neither builds nor breaks */ }
+      else if (paused[k] || dowOff(h, k)){ /* bridges: neither builds nor breaks */ }
       else if (k === keyFor(end)){ /* today is grace until tomorrow */ }
       else {
         if (graceAt === null || (di - graceAt) >= GRACE_EVERY) graceAt = di;  // level holds
@@ -1281,7 +1305,7 @@ function statsFor(h){
   if (!keys.length) return { streak:0, best:0, last30:0, missed:0 };
 
   const kept    = k => has(days, k);       // any record counts - the goal is to log
-  const excused = k => !!paused[k];        // a paused day neither breaks nor extends a run
+  const excused = k => !!paused[k] || dowOff(h, k);   // paused, or a day this card skips
 
   // consecutive missed (unlogged, non-paused) days ending yesterday
   let missed = 0, g = 0;
@@ -1305,7 +1329,11 @@ function statsFor(h){
     break;
   }
 
-  // best streak ever - a run bridges a gap only if every day in it was paused
+  /* Best streak ever - a run bridges a gap only if every day in it was EXCUSED, which
+     now includes days the card does not run on. It used to test `paused` alone, so a
+     weekday habit would report "Streak 28, Best 5": the live streak crossed weekends
+     and the historical one did not. Two numbers on the same card disagreeing about
+     what a streak is, is worse than either being wrong on its own. */
   let best=0, run=0, prev=null;
   for (const k of keys){
     const d = parseKey(k);
@@ -1314,7 +1342,7 @@ function statsFor(h){
       if (gap === 1) run++;
       else {
         let bridged = gap > 1 && gap <= 40;
-        for (let i=1;i<gap && bridged;i++){ const x=new Date(prev); x.setDate(prev.getDate()+i); if (!paused[keyFor(x)]) bridged=false; }
+        for (let i=1;i<gap && bridged;i++){ const x=new Date(prev); x.setDate(prev.getDate()+i); if (!excused(keyFor(x))) bridged=false; }
         run = bridged ? run+1 : 1;
       }
     } else run = 1;
@@ -1466,14 +1494,14 @@ window.spendBlur = el => {
 window.addSpend = id => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  const el = document.querySelector('.spendIn[data-h="'+id+'"]');
-  const raw = el ? el.value : (spendDraft[id] || '');
-  const v = cycleParse(h, raw);
+  const key = String(id);
+  const el = document.querySelector('.spendIn[data-h="'+key+'"]');
+  const v = isHours(h) ? readHM(key) : cycleParse(h, el ? el.value : (spendDraft[key] || ''));
   if (!isFinite(v) || v === 0) return;            // an empty box is not an entry of nothing
   const k = todayKey();
   setSpend(h, k, spends(h, k).concat(v));
-  spendDraft[id] = '';
-  if (el) el.value = '';
+  if (isHours(h)) clearHM(key);
+  else { spendDraft[key] = ''; if (el) el.value = ''; }
   jTyping = null;                                  // the field is done with; renders resume
   save(); checkMilestones(); render();
 };
@@ -1491,10 +1519,12 @@ window.spendNothing = id => {
 window.addSpendTo = (id, k) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  const el = document.querySelector('.spendIn[data-h="c'+id+'"]');
-  const v = cycleParse(h, el ? el.value : '');
+  const key = 'c' + id;
+  const el = document.querySelector('.spendIn[data-h="'+key+'"]');
+  const v = isHours(h) ? readHM(key) : cycleParse(h, el ? el.value : '');
   if (!isFinite(v)) return;
   setSpend(h, k, spends(h, k).concat(v));
+  if (isHours(h)) clearHM(key); else if (el) el.value = '';
   jTyping = null;
   save(); render();
 };
@@ -1670,6 +1700,13 @@ window.setFormDir  = d => { grab(); form.dir = d; render(); };
 window.setFormPeriod = v => { grab(); form.period = v; render(); };
 // Back to step one. Keeps the name already typed - only the kind is being reconsidered.
 window.reType = () => { grab(); form.type = null; render(); };
+window.toggleDow = i => {
+  grab();
+  const a = (form.dows || [1,1,1,1,1,1,1]).slice();
+  a[i] = a[i] ? 0 : 1;
+  if (!a.some(x => x)) return;                 // never let every day be switched off
+  form.dows = a; render();
+};
 
 // Pause: excuse the next N days (from tomorrow — today can't be paused, so a
 // break is always deliberate). Excused days neither break nor extend a streak.
@@ -1797,7 +1834,8 @@ window.doClearHist     = () => {
 
 window.openNew = () => {
   form = { name:'', cue:'', stack:'', minimum:'', type:null, dir:'up',
-           budget:'', target:'', period:'week', pdays:7, cur:'R' };
+           budget:'', target:'', period:'week', pdays:7, cur:'R',
+           dows:[1,1,1,1,1,1,1] };
   editing = 'new'; confirm = null; screen = 'manage'; render();
 };
 
@@ -1807,7 +1845,8 @@ window.openEdit = id => {
   form = { name:h.name, cue:h.cue||'', stack:h.stack||'', minimum:h.minimum||'',
            type:h.type||'toggle', dir:h.dir||'up',
            budget:h.budget||'', target:h.target?fmtGap(h.target):'',
-           period:h.period||'week', pdays:h.pdays||7, cur:h.cur||'R' };
+           period:h.period||'week', pdays:h.pdays||7, cur:h.cur||'R',
+           dows:(h.dows && h.dows.length===7) ? h.dows.slice() : [1,1,1,1,1,1,1] };
   editing = id; confirm = null; clearHist = null; render();
 };
 
@@ -1835,6 +1874,10 @@ window.commit = () => {
     type:    form.type || 'toggle',
     dir:     form.dir || 'up'
   };
+  // Stored only when it says something. All seven on is the default, and writing it out
+  // would put a redundant array into every card and every sync payload.
+  const dw = (form.dows && form.dows.length === 7) ? form.dows.map(x => x ? 1 : 0) : null;
+  payload.dows = (dw && dw.some(x => !x)) ? dw : undefined;
   if (payload.type === 'hours'){
     const mins = parseDur(form.target);
     payload.target = isFinite(mins) && mins > 0 ? mins : 0;
@@ -2323,7 +2366,7 @@ function dayChip(h){
     controls =
       '<span class="chipNum"><span class="chipK">'+(isHours(h)?'logged':'spent')+'</span>'+
         (tot === null ? '\u2014' : esc(cycleFmt(h, tot)))+'</span>'+
-      spendBox('c'+h.id, isHours(h) ? '1h 30m' : 'amount')+
+      (isHours(h) ? hoursBox('c'+h.id) : spendBox('c'+h.id, 'amount'))+
       '<button class="chipBtn" onclick="addSpendTo('+h.id+',\''+k+'\')">Add</button>'+
       (list.length ? '<button class="chipBtn" onclick="dropSpend('+h.id+',\''+k+'\')">Undo one</button>'+
         '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
@@ -2540,6 +2583,36 @@ function journalRow(h, today){
 /* The amount box, shared by the card and the day chip - each with its own key so the two
    cannot fight over one draft while both are on screen. inputmode="decimal" gets the
    number pad on a phone without type="number"'s spinners and locale grief. */
+/* Typing "30" and getting thirty HOURS is the parser being clever at the user's expense.
+   There is no rule that reads a bare number correctly - thirty means minutes to whoever
+   typed it and eight means hours, and the card cannot know which. So it stops asking: two
+   boxes, each labelled, and nothing to interpret. The h box is left empty far more often
+   than the m box, which is why m carries the placeholder. */
+function hoursBox(key){
+  const g = u => esc(spendDraft[key + ':' + u] || '');
+  const box = (u, ph, lbl) =>
+    '<input class="spendIn hm" data-h="'+key+'" data-u="'+u+'" inputmode="numeric" '+
+      'value="'+g(u)+'" placeholder="'+ph+'" aria-label="'+lbl+'" '+
+      'onfocus="jTyping=this.dataset.h" oninput="hmType(this)" onblur="spendBlur(this)">';
+  return '<span class="hmBox">'+
+    box('h', '0', 'Hours')+'<span class="hmU">h</span>'+
+    box('m', '30', 'Minutes')+'<span class="hmU">m</span>'+
+  '</span>';
+}
+window.hmType = el => { spendDraft[el.dataset.h + ':' + el.dataset.u] = el.value; };
+function readHM(key){
+  const g = u => {
+    const el = document.querySelector('.spendIn[data-h="'+key+'"][data-u="'+u+'"]');
+    return el ? el.value : (spendDraft[key + ':' + u] || '');
+  };
+  const hh = parseFloat(g('h')) || 0, mm = parseFloat(g('m')) || 0;
+  return Math.round(hh * 60 + mm);
+}
+function clearHM(key){
+  spendDraft[key + ':h'] = ''; spendDraft[key + ':m'] = '';
+  document.querySelectorAll('.spendIn[data-h="'+key+'"]').forEach(el => { el.value = ''; });
+}
+
 function spendBox(key, ph){
   return '<input class="spendIn" data-h="'+key+'" inputmode="decimal" '+
     'value="'+esc(spendDraft[key] || '')+'" placeholder="'+esc(ph)+'" '+
@@ -2605,7 +2678,7 @@ function hoursRow(h, today){
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
     '<div class="bRow">'+
-      spendBox(String(h.id), '1h 30m')+
+      hoursBox(String(h.id))+
       '<button class="tNone bAdd" onclick="addSpend('+h.id+')">Add</button>'+
       (logged ? '' : '<button class="chipBtn bNil" onclick="spendNothing('+h.id+')">None today</button>')+
     '</div>'+
@@ -3086,7 +3159,7 @@ function habitDayStats(h){
   const buckets = DOW_SHORT.map(function(){ return { n:0, hit:0, vals:[], real:[] }; });
   for (const d = new Date(from); d <= end; d.setDate(d.getDate()+1)){
     const k = keyFor(d);
-    if (paused[k]) continue;                       // an excused day is not evidence
+    if (paused[k] || dowOff(h, k)) continue;       // an excused day is not evidence
     const b = buckets[(d.getDay()+6)%7];
     b.n++;
     if (has(h.days, k)){
@@ -3702,6 +3775,22 @@ function kindChooser(){
   '</div>';
 }
 
+/* Seven toggles, Monday first. All on by default, and at least one has to stay on -
+   a card that counts on no days is not a card. */
+function dowFields(){
+  const a = form.dows || [1,1,1,1,1,1,1];
+  return '<div class="fld">'+
+      '<label class="lbl">Days it counts</label>'+
+      '<div class="dowPick">'+
+        DOW_SHORT.map((d,i) =>
+          '<button type="button" class="dowBtn'+(a[i]?' on':'')+'" aria-pressed="'+(!!a[i])+'" '+
+            'aria-label="'+DOW_FULL[i]+'" onclick="toggleDow('+i+')">'+d+'</button>').join('')+
+      '</div>'+
+      '<p class="hint">Untick a day and the card skips it: it will not break a streak and '+
+        'will not be counted as missed.</p>'+
+    '</div>';
+}
+
 function budgetFields(){
   const per = form.period || 'week';
   const hrs = form.type === 'hours';
@@ -3796,7 +3885,8 @@ function editorHTML(title){
         dirBtn('down', form.type==='time' ? 'Earlier is better' : 'Less is better')+
       '</div>' : '')+
     '</div>'+
-    ((form.type === 'budget' || form.type === 'hours') ? budgetFields() : '');
+    ((form.type === 'budget' || form.type === 'hours') ? budgetFields() : '')+
+    dowFields();
 
   if (form.type === 'score'){                                // stripped editor - nothing to name/cue
     return '<div class="editor">'+
@@ -3829,7 +3919,7 @@ function editorHTML(title){
        budget is a number you spend against: there is no time and place at which it
        happens, and no smallest version that still counts. Three fields that make no
        sense for the card in front of you are worse than none. */
-    (form.type === 'budget' ? '' :
+    ((form.type === 'budget' || form.type === 'hours') ? '' :
     '<div class="fld">'+
       '<label class="lbl" for="fCue">When and where <span class="opt">\u00b7 optional</span></label>'+
       '<input id="fCue" value="'+esc(form.cue)+'" placeholder="At 9pm, in the bedroom">'+

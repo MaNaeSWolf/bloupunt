@@ -2167,6 +2167,52 @@ logged, 8h 30m to go and 5h 43m a day; "1h30" typed into the card adding correct
 
 ---
 
+### 2026-08-21 (later) — Skip days, and admitting the time parser was a bad idea
+
+#### Typing 30 and getting thirty hours
+
+The Hours card parsed a bare number as hours, on the reasoning that a card called Hours
+should read "8" as a working day. Reported immediately: typing 30 for half an hour logged
+thirty hours.
+
+There is no rule that reads a bare number correctly. Thirty means minutes to the person
+typing it and eight means hours, and nothing in the string distinguishes them - the
+cleverness was the bug, not the implementation of it. So the card stops guessing: **two
+boxes, h and m, each labelled**, and nothing left to interpret. The m box carries the
+placeholder because it is the one used more often.
+
+`parseDur` stays for the target field in the editor, where "40h" is written out and the
+hint says so.
+
+#### Days a card does not run on
+
+Seven toggles at the bottom of every card's settings, all on by default. Untick Saturday
+and Sunday and a weekday habit stops being accused of missing every weekend.
+
+Implemented as **paused days, not as a new concept**. That machinery already exists, is
+already correct, and `chainRun`, `statsFor` and the weekday stats already understand it -
+a skipped day neither builds a run nor breaks one. Absent `dows` means all seven, so every
+card that existed before this behaves exactly as it did, and the array is only written to
+storage when it actually says something rather than adding a redundant seven flags to
+every card and every sync payload.
+
+The proof is two cards holding **identical logs**: Monday to Friday for forty days. With
+the weekend ticked off: streak 28, nothing missed. Without: streak 0, one missed, and the
+calendar painting every Saturday and Sunday in miss-grey.
+
+**And a disagreement this exposed.** The historical best streak bridged a gap only if
+every day in it was `paused` - it had never heard of skipped days. So the weekday card
+reported **"Streak 28, Best 5"**: the live streak crossed weekends and the record did not.
+Two numbers on one card disagreeing about what a streak is, is worse than either being
+wrong alone. Best now uses the same `excused` predicate as the live streak, and reads 28.
+Worth remembering that adding a second kind of excused day means finding every place that
+knew about the first.
+
+Hours also drops **When and where**, **Straight after** and **The floor**, for the same
+reason Budget did in v69. → `sw.js v72`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
