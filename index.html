@@ -263,7 +263,17 @@
   /* Over budget: the card says so before you have read a word of it. */
   .row.overspent{border-color:#E7C9BE;background:linear-gradient(var(--clayBg),var(--clayBg))}
   .streak .over{color:var(--clay);font-weight:600}
+  .streak .hit{color:var(--sageDeep);font-weight:600}
   .sv.bad{color:var(--clay)}
+  .kinds{display:flex;flex-direction:column;gap:7px}
+  .kind{display:block;width:100%;text-align:left;background:var(--bg);
+    border:1px solid var(--faint);border-radius:12px;padding:11px 14px}
+  .kind:hover{border-color:var(--sage);background:var(--card)}
+  .kindT{display:block;font-size:14.5px;font-weight:500;color:var(--ink)}
+  .kindD{display:block;font-size:12.5px;color:var(--soft);line-height:1.45;margin-top:2px}
+  .kindNow{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    background:var(--bg);border:1px solid var(--faint);border-radius:10px;padding:9px 12px}
+  .kindNow .link{padding:0;font-size:12.5px}
   .bFld{display:flex;align-items:center;gap:8px}
   .bFld input{flex:1;min-width:0}
   .curIn{flex:0 0 52px;text-align:center}
@@ -504,7 +514,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v70';
+const BUILD = 'bloupunt-v71';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -840,6 +850,12 @@ const isTime    = h => h.type === 'time';
 const isMood    = h => h.type === 'mood';
 const isJournal = h => h.type === 'journal';
 const isBudget  = h => h.type === 'budget';
+const isHours   = h => h.type === 'hours';
+/* Hours is the budget card with the sign flipped: several entries a day summed into
+   `days[k]`, the parts kept in `extra[k]`, an optional target over a period. The one
+   thing it does NOT share is direction - spending more is worse and working more is
+   better, so every colour decision is the mirror of the budget's. */
+const isCycle   = h => isBudget(h) || isHours(h);
 
 /* Budget rides the same side channel as mood: several amounts a day, so `extra[k]` holds
    the individual spends and `days[k]` holds the day's TOTAL - the one number every other
@@ -862,6 +878,22 @@ function setSpend(h, k, list){
   h.extra[k] = use;
   h.days[k]  = Math.round(use.reduce((a,b)=>a+b,0) * 100) / 100;
 }
+/* Typed durations. The card is called Hours, so a bare number is hours - "8" is a working
+   day, not eight minutes. Anything else has to say what it is: 30m, 1h30, 1:30, 0.5.
+   Guessing from magnitude ("small means hours, large means minutes") would be wrong
+   exactly when someone logs a genuine 90-minute stretch. */
+function parseDur(s){
+  const str = String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, '');
+  if (!str) return NaN;
+  let m;
+  if ((m = str.match(/^(\d+):([0-5]?\d)$/)))                     return +m[1] * 60 + +m[2];
+  if ((m = str.match(/^(\d+(?:\.\d+)?)h(?:rs?|ours?)?(\d+(?:\.\d+)?)?(?:m|min|mins)?$/)))
+    return Math.round(+m[1] * 60 + (m[2] ? +m[2] : 0));
+  if ((m = str.match(/^(\d+(?:\.\d+)?)(?:m|min|mins)$/)))        return Math.round(+m[1]);
+  if ((m = str.match(/^(\d+(?:\.\d+)?)$/)))                     return Math.round(+m[1] * 60);
+  return NaN;
+}
+
 // Whole numbers stay whole; cents appear only when there are cents to show.
 function fmtMoney(h, v){
   const sym = ((h && h.cur) || 'R').trim();
@@ -895,7 +927,10 @@ function budgetPeriod(h, d){
   return { start:s, end:e };
 }
 
-function budgetState(h){
+/* The same arithmetic for money and for minutes: how much has gone into this period, how
+   much of the target is left, how long it has to run. Only the meaning of "over" differs,
+   and that belongs to the caller. */
+function cycleState(h, amount){
   const today = midnight();
   const { start, end } = budgetPeriod(h, today);
   let spent = 0;
@@ -903,13 +938,14 @@ function budgetState(h){
     const v = (h.days||{})[keyFor(d)];
     if (typeof v === 'number') spent += v;
   }
-  const budget = +h.budget || 0;
   const len = Math.round((end - start) / 86400000) + 1;
-  return { start, end, spent: Math.round(spent*100)/100, budget,
-           left: Math.round((budget - spent)*100)/100,
+  return { start, end, spent: Math.round(spent*100)/100, amount,
+           left: Math.round((amount - spent)*100)/100,
            daysLeft: Math.round((end - today) / 86400000) + 1,   // today counts
-           len, allow: len ? budget / len : 0, over: spent > budget };
+           len, allow: len ? amount / len : 0, over: spent > amount };
 }
+function budgetState(h){ const s = cycleState(h, +h.budget || 0); s.budget = s.amount; return s; }
+function hoursState(h){  const s = cycleState(h, +h.target || 0); s.target = s.amount; return s; }
 /* Journal rides the same side channel as mood: `extra[k]` holds the text, `days[k]`
    holds 1. That 1 is not a placeholder - it is the honest value. Writing anything at
    all is the whole habit, so a journal day is worth exactly what a tick is worth, and
@@ -1124,6 +1160,23 @@ function bandFor(h){
       if (v <= 0) return 4;                       // spent nothing: the best kind of day
       const r = v / allow;
       return r <= 0.5 ? 4 : r <= 1 ? 3 : r <= 1.5 ? 2 : r <= 2 ? 1 : 0;
+    };
+  }
+  if (isHours(h)){
+    /* With a target, a day is measured against its share of it and MORE is greener - the
+       budget's ladder read upside down. With no target there is nothing absolute to
+       measure against, so it falls back to the quintiles every other card uses. */
+    const allow = hoursState(h).allow;
+    if (!allow){
+      const q = quintiler(last21(h));
+      return k => typeof days[k] === 'number' ? q(days[k]) : 2;
+    }
+    return k => {
+      const v = days[k];
+      if (typeof v !== 'number') return 2;
+      if (v <= 0) return 0;                       // logged, but nothing done
+      const r = v / allow;
+      return r <= 0.5 ? 1 : r <= 1 ? 2 : r <= 1.5 ? 3 : 4;
     };
   }
   const q = quintiler(last21(h));
@@ -1391,6 +1444,11 @@ window.bump = (id, k, delta) => {
    replacing innerHTML under a focused input drops the Android keyboard and it cannot be
    put back from code. Adding a spend is a deliberate button press, so the render happens
    there, once, after the field is done with. */
+// Money is a decimal; time is 30m, 1h30, 1:30 or a bare number of hours.
+const cycleParse = (h, raw) => isHours(h)
+  ? parseDur(raw)
+  : Math.round(parseFloat(String(raw).replace(/[^0-9.\-]/g, '')) * 100) / 100;
+const cycleFmt = (h, v) => isHours(h) ? fmtGap(v) : fmtMoney(h, v);
 window.spendType = el => { spendDraft[el.dataset.h] = el.value; };
 /* Without this the card froze. Focusing the amount box takes the no-render guard, and
    only `Add` ever gave it back - so after tapping the box in the day chip you could not
@@ -1410,8 +1468,8 @@ window.addSpend = id => {
   if (!h) return;
   const el = document.querySelector('.spendIn[data-h="'+id+'"]');
   const raw = el ? el.value : (spendDraft[id] || '');
-  const v = Math.round(parseFloat(String(raw).replace(/[^0-9.\-]/g, '')) * 100) / 100;
-  if (!isFinite(v) || v === 0) return;            // an empty box is not a spend of nothing
+  const v = cycleParse(h, raw);
+  if (!isFinite(v) || v === 0) return;            // an empty box is not an entry of nothing
   const k = todayKey();
   setSpend(h, k, spends(h, k).concat(v));
   spendDraft[id] = '';
@@ -1434,7 +1492,7 @@ window.addSpendTo = (id, k) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
   const el = document.querySelector('.spendIn[data-h="c'+id+'"]');
-  const v = Math.round(parseFloat(String(el ? el.value : '').replace(/[^0-9.\-]/g, '')) * 100) / 100;
+  const v = cycleParse(h, el ? el.value : '');
   if (!isFinite(v)) return;
   setSpend(h, k, spends(h, k).concat(v));
   jTyping = null;
@@ -1610,6 +1668,8 @@ window.setDayNone = (id, k) => {
 window.setFormType = t => { grab(); form.type = t; if (t === 'time' && !form.dir) form.dir = 'up'; render(); };
 window.setFormDir  = d => { grab(); form.dir = d; render(); };
 window.setFormPeriod = v => { grab(); form.period = v; render(); };
+// Back to step one. Keeps the name already typed - only the kind is being reconsidered.
+window.reType = () => { grab(); form.type = null; render(); };
 
 // Pause: excuse the next N days (from tomorrow — today can't be paused, so a
 // break is always deliberate). Excused days neither break nor extend a streak.
@@ -1736,8 +1796,8 @@ window.doClearHist     = () => {
 };
 
 window.openNew = () => {
-  form = { name:'', cue:'', stack:'', minimum:'', type:'toggle', dir:'up',
-           budget:'', period:'week', pdays:7, cur:'R' };
+  form = { name:'', cue:'', stack:'', minimum:'', type:null, dir:'up',
+           budget:'', target:'', period:'week', pdays:7, cur:'R' };
   editing = 'new'; confirm = null; screen = 'manage'; render();
 };
 
@@ -1746,7 +1806,8 @@ window.openEdit = id => {
   if (!h) return;
   form = { name:h.name, cue:h.cue||'', stack:h.stack||'', minimum:h.minimum||'',
            type:h.type||'toggle', dir:h.dir||'up',
-           budget:h.budget||'', period:h.period||'week', pdays:h.pdays||7, cur:h.cur||'R' };
+           budget:h.budget||'', target:h.target?fmtGap(h.target):'',
+           period:h.period||'week', pdays:h.pdays||7, cur:h.cur||'R' };
   editing = id; confirm = null; clearHist = null; render();
 };
 
@@ -1774,6 +1835,14 @@ window.commit = () => {
     type:    form.type || 'toggle',
     dir:     form.dir || 'up'
   };
+  if (payload.type === 'hours'){
+    const mins = parseDur(form.target);
+    payload.target = isFinite(mins) && mins > 0 ? mins : 0;
+    payload.period = form.period || 'week';
+    payload.pdays  = Math.max(1, Math.round(+form.pdays || 7));
+    const exh = (editing && editing !== 'new') ? data.habits.find(x => x.id === editing) : null;
+    payload.anchor = (exh && exh.anchor) || todayKey();
+  }
   if (payload.type === 'budget'){
     payload.budget = Math.max(0, +String(form.budget).replace(/[^0-9.]/g,'') || 0);
     payload.period = form.period || 'week';
@@ -1973,7 +2042,7 @@ window.importData = () => {
 function grab(){
   const g = id => { const el = document.getElementById(id); return el ? el.value : null; };
   const map = { fName:'name', fCue:'cue', fStack:'stack', fMin:'minimum',
-                fBudget:'budget', fPdays:'pdays', fCur:'cur' };
+                fBudget:'budget', fPdays:'pdays', fCur:'cur', fTarget:'target' };
   for (const [id,key] of Object.entries(map)){
     const v = g(id);
     if (v !== null) form[key] = v;
@@ -2031,15 +2100,15 @@ function peekValue(h, k){
   // Toggles and the score card carry their own answer already - a green block is
   // "done", and the score is printed on the bubble you just tapped. Repeating it adds
   // a word and no information, so these get the date alone.
-  if (isBudget(h)){
+  if (isCycle(h)){
     const v = h.days[k];
-    return typeof v === 'number' ? fmtMoney(h, v) : '';
+    return typeof v === 'number' ? cycleFmt(h, v) : '';
   }
   if (isJournal(h)){
     const w = wordCount(journalText(h, k));
     return w ? w+' word'+(w===1?'':'s') : '';
   }
-  if (!isTime(h) && !isCounter(h) && !isMood(h) && !isBudget(h)) return '';
+  if (!isTime(h) && !isCounter(h) && !isMood(h) && !isCycle(h)) return '';
   if (!has(h.days, k))
     return (data.paused && data.paused[k]) ? 'paused' : 'not logged';
   const v = h.days[k];
@@ -2072,7 +2141,7 @@ function peekBubble(h, k, i, n){
 
 function chainStrip(h){
   const today = todayKey();
-  const counter = isCounter(h) || isJournal(h) || isBudget(h), col = counter ? counterScale(h) : null;
+  const counter = isCounter(h) || isJournal(h) || isCycle(h), col = counter ? counterScale(h) : null;
   const info = windowDays(N_DAYS).map(d => {
     const k = keyFor(d);
     return {
@@ -2174,7 +2243,7 @@ function fullGrid(h){
   const now = new Date(), today = todayKey();
   // Time habits are banded like counters here - the month grid is colour-only, so it
   // needs the good-to-less-good scale, not the toggle's flat green.
-  const graded = isCounter(h) || isTime(h) || isMood(h) || isJournal(h) || isBudget(h),
+  const graded = isCounter(h) || isTime(h) || isMood(h) || isJournal(h) || isCycle(h),
         col = graded ? counterScale(h) : null;
 
   // Label the first column of each month. Suppress a label whose month is only a
@@ -2248,13 +2317,13 @@ function dayChip(h){
         'onchange="setDayTime('+h.id+',\''+k+'\',this.value)">'+
       '<button class="chipBtn'+((v!==null&&v>=NONE_MIN)?' on':'')+'" onclick="setDayNone('+h.id+',\''+k+'\')">Didn’t happen</button>'+
       (logged ? '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
-  } else if (isBudget(h)){
+  } else if (isCycle(h)){
     const list = spends(h, k);
     const tot  = list.length ? list.reduce((a,b)=>a+b,0) : null;
     controls =
-      '<span class="chipNum"><span class="chipK">spent</span>'+
-        (tot === null ? '\u2014' : esc(fmtMoney(h, tot)))+'</span>'+
-      spendBox('c'+h.id, 'amount')+
+      '<span class="chipNum"><span class="chipK">'+(isHours(h)?'logged':'spent')+'</span>'+
+        (tot === null ? '\u2014' : esc(cycleFmt(h, tot)))+'</span>'+
+      spendBox('c'+h.id, isHours(h) ? '1h 30m' : 'amount')+
       '<button class="chipBtn" onclick="addSpendTo('+h.id+',\''+k+'\')">Add</button>'+
       (list.length ? '<button class="chipBtn" onclick="dropSpend('+h.id+',\''+k+'\')">Undo one</button>'+
         '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
@@ -2478,6 +2547,72 @@ function spendBox(key, ph){
     'onblur="spendBlur(this)">';
 }
 
+function hoursRow(h, today){
+  const open = expanded === h.id;
+  const st = hoursState(h);
+  const logged = has(h.days, today);
+  const s = statsFor(h);
+  const risk = rowRisk(h);
+  const warn = !logged && s.missed === 1, alarm = !logged && s.missed >= 2;
+  const cls = 'row' + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls +
+    (flashIds[h.id]?' undone':'');
+  const todayTot = typeof h.days[today] === 'number' ? h.days[today] : 0;
+
+  /* With no target there is nothing to count down to, so the card reports what it knows:
+     today, and the period around it. Inventing a goal nobody asked for would be worse
+     than saying less. */
+  const dleft = Math.max(0, st.daysLeft);
+  const dtxt = dleft === 1 ? 'last day' : dleft + ' days left';
+  const sub = !st.amount
+    ? fmtGap(todayTot) + ' today \u00b7 ' + fmtGap(st.spent) + ' this ' +
+      (h.period === 'month' ? 'month' : h.period === 'days' ? ('period') : 'week')
+    : st.over
+      ? '<span class="hit">Target met</span> \u00b7 ' + fmtGap(st.spent) + ' of ' + fmtGap(st.amount)
+      : fmtGap(st.left) + ' to go \u00b7 ' + dtxt;
+
+  let expBlock = '';
+  if (open){
+    const details = [
+      h.cue     ? '<div class="detail"><div class="dk">When and where</div><div class="dv">'+esc(h.cue)+'</div></div>' : '',
+      h.stack   ? '<div class="detail"><div class="dk">Straight after</div><div class="dv">'+esc(h.stack)+'</div></div>' : ''
+    ].join('');
+    let w7 = 0; const c = midnight();
+    for (let i=0;i<7;i++){ const v = h.days[keyFor(c)]; if (typeof v === 'number') w7 += v; c.setDate(c.getDate()-1); }
+    const span = fmtDay(st.start) + ' \u2013 ' + fmtDay(st.end);
+    const statBlock =
+      '<div class="stats">'+
+        '<div><div class="sl">Today</div><div class="sv">'+esc(fmtGap(todayTot))+'</div></div>'+
+        '<div><div class="sl">'+(st.amount ? (st.over ? 'Over' : 'To go') : 'Last 7')+'</div>'+
+          '<div class="sv">'+esc(fmtGap(st.amount ? Math.abs(st.left) : w7))+'</div></div>'+
+        '<div><div class="sl">'+(st.amount ? 'A day' : 'Period')+'</div>'+
+          '<div class="sv">'+esc(fmtGap(st.amount ? st.allow : st.spent))+'</div></div>'+
+      '</div>'+
+      (st.amount
+        ? '<div class="next">'+esc(span)+' \u00b7 '+esc(fmtGap(st.amount))+' a '+
+            (h.period==='month'?'month':h.period==='days'?(st.len+' days'):'week')+'</div>'
+        : '<div class="next">No target set \u2014 just the log</div>');
+    expBlock = '<div class="exp">'+ details + fullGrid(h) + dayChip(h) + statBlock +
+      dayStatsBlock(h) + chainNote(h) + '</div>';
+  }
+
+  return '<div class="'+cls+'">'+
+    '<div class="top">'+
+      '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
+        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
+        '<div class="streak">'+sub+'</div>'+
+      '</button>'+
+      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
+        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+    '</div>'+
+    '<div class="bRow">'+
+      spendBox(String(h.id), '1h 30m')+
+      '<button class="tNone bAdd" onclick="addSpend('+h.id+')">Add</button>'+
+      (logged ? '' : '<button class="chipBtn bNil" onclick="spendNothing('+h.id+')">None today</button>')+
+    '</div>'+
+    riskBlock(risk) + hoursGraph(h) + expBlock +
+  '</div>';
+}
+
 function budgetRow(h, today){
   const open = expanded === h.id;
   const st = budgetState(h);
@@ -2573,12 +2708,27 @@ function spendScale(h){
   for (const d of windowDays(N_DAYS))
     for (const v of spends(h, keyFor(d))) if (v > 0) vals.push(v);
   const q = quintiler(vals);
-  return v => v <= 0 ? 4 : 4 - q(v);        // more spent, further toward amber
+  const flip = isHours(h);                  // a long stretch of work is the good end
+  return v => v <= 0 ? (flip ? 0 : 4) : (flip ? q(v) : 4 - q(v));
 }
 
 const BGH = 62, BPAD = 8;
-function budgetGraph(h){
-  const st = budgetState(h);
+/* Shared by Budget and Hours. `o` carries everything the two disagree about:
+     st        the period state
+     fmt       how a value reads aloud
+     overCol   the colour of whatever passes the target - clay for money, green for work
+     underCol  the colour of the run before it gets there
+     target    false when there is none, which removes the line and the rule entirely */
+function budgetGraph(h){ return cycleGraph(h, {
+  st: budgetState(h), fmt: v => fmtMoney(h, v),
+  overCol: 'var(--clay)', underCol: 'var(--sageDeep)', target: true }); }
+function hoursGraph(h){
+  const st = hoursState(h);
+  return cycleGraph(h, { st, fmt: v => fmtGap(v),
+    overCol: 'var(--sageDeep)', underCol: 'var(--sage)', target: st.amount > 0 });
+}
+function cycleGraph(h, o){
+  const st = o.st;
   const end = midnight(), today = todayKey();
   const days = windowDays(N_DAYS);
   const n = N_DAYS;
@@ -2596,25 +2746,25 @@ function budgetGraph(h){
   });
 
   const peak = info.reduce((m, x) => (x.tot !== null && x.run > m) ? x.run : m, 0);
-  const top  = Math.max(st.budget, peak, 1);
+  const top  = Math.max(o.target ? st.amount : 0, peak, 1);
   const yOf  = v => BGH - BPAD - (Math.max(0, v) / top) * (BGH - BPAD * 2);
   // The stems' own ruler: the biggest single day in the window reaches full height.
   const dayTop = Math.max(1, info.reduce((m, x) => (x.tot > m ? x.tot : m), 0));
   const yDay = v => BGH - BPAD - (Math.max(0, v) / dayTop) * (BGH - BPAD * 2);
   const xOf  = i => ((i + 0.5) / n) * 100;
   const px   = i => xOf(i).toFixed(2) + '%';
-  const base = yOf(0), yB = yOf(st.budget);
+  const base = yOf(0), yB = yOf(st.amount);
 
-  const rule = st.budget > 0
+  const rule = (o.target && st.amount > 0)
     ? '<line x1="0" y1="'+yB.toFixed(1)+'" x2="100%" y2="'+yB.toFixed(1)+
-      '" stroke="'+(peak > st.budget ? 'var(--clay)' : 'var(--faint)')+
-      '" stroke-width="1" stroke-dasharray="3 3" opacity="'+(peak > st.budget ? '.6' : '.9')+'"/>'
+      '" stroke="'+(peak > st.amount ? o.overCol : 'var(--faint)')+
+      '" stroke-width="1" stroke-dasharray="3 3" opacity="'+(peak > st.amount ? '.6' : '.9')+'"/>'
     : '';
 
   const seg = (x1, y1, x2, y2, col) =>
     '<line x1="'+x1+'" y1="'+y1.toFixed(1)+'" x2="'+x2+'" y2="'+y2.toFixed(1)+
     '" stroke="'+col+'" stroke-width="2" stroke-linecap="round" opacity=".75"/>';
-  const over = v => st.budget > 0 && v > st.budget;
+  const over = v => o.target && st.amount > 0 && v > st.amount;
 
   /* Joins consecutive LOGGED days, not adjacent ones. A day you did not record leaves the
      running total exactly where it was, so the line should carry straight across it -
@@ -2627,15 +2777,15 @@ function budgetGraph(h){
   for (let m = 0; m + 1 < pts.length; m++){
     const i = pts[m], j = pts[m+1];
     const a = info[i], b = info[j];
-    if (a.ps !== b.ps) continue;
+    if (!o.target || a.ps !== b.ps) continue;
     if (over(a.run) !== over(b.run)){
-      const f  = (st.budget - a.run) / (b.run - a.run);
+      const f  = (st.amount - a.run) / (b.run - a.run);
       const xc = (xOf(i) + (xOf(j) - xOf(i)) * f).toFixed(2) + '%';
-      line += seg(px(i), yOf(a.run), xc, yB, over(a.run) ? 'var(--clay)' : 'var(--sageDeep)');
-      line += seg(xc, yB, px(j), yOf(b.run), over(b.run) ? 'var(--clay)' : 'var(--sageDeep)');
+      line += seg(px(i), yOf(a.run), xc, yB, over(a.run) ? o.overCol : o.underCol);
+      line += seg(xc, yB, px(j), yOf(b.run), over(b.run) ? o.overCol : o.underCol);
     } else {
       line += seg(px(i), yOf(a.run), px(j), yOf(b.run),
-                  over(b.run) ? 'var(--clay)' : 'var(--sageDeep)');
+                  over(b.run) ? o.overCol : o.underCol);
     }
   }
 
@@ -2645,7 +2795,7 @@ function budgetGraph(h){
     const act = 'peekDay('+h.id+',\''+x.k+'\')';
     const hit = '<rect x="'+((i / n) * 100).toFixed(2)+'%" y="0" width="'+(100 / n).toFixed(2)+
       '%" height="'+BGH+'" fill="transparent" style="cursor:pointer" role="button" tabindex="0" '+
-      'aria-label="'+x.k+(x.tot === null ? ', not logged' : ', '+fmtMoney(h, x.tot))+'" '+
+      'aria-label="'+x.k+(x.tot === null ? ', not logged' : ', '+o.fmt(x.tot))+'" '+
       'onclick="'+act+'"></rect>';
     const dot = (y, r, v) => '<circle cx="'+cx+'" cy="'+y.toFixed(1)+'" r="'+r+
       '" fill="'+bandColourIdx(band(v))+'" stroke="'+(x.sel ? 'var(--ink)' : 'rgba(61,59,55,.28)')+
@@ -2664,9 +2814,9 @@ function budgetGraph(h){
     const bar = (y1, y2, col) => '<line x1="'+cx+'" y1="'+y1.toFixed(1)+'" x2="'+cx+'" y2="'+
       y2.toFixed(1)+'" stroke="'+col+'" stroke-width="'+(x.sel ? 3 : 2)+
       '" stroke-linecap="round"/>';
-    const over = st.allow > 0 && yTop < yA;
-    const stem = bar(base, over ? yA : yTop, 'var(--faint)') +
-                 (over ? bar(yA, yTop, 'var(--clay)') : '');
+    const past = o.target && st.allow > 0 && yTop < yA;
+    const stem = bar(base, past ? yA : yTop, 'var(--faint)') +
+                 (past ? bar(yA, yTop, o.overCol) : '');
     let c = 0;
     const dots = x.list.map(v => { c += v; return dot(yDay(c), x.sel ? 3.4 : 2.6, v); }).join('');
     return stem + dots + hit;
@@ -3425,6 +3575,7 @@ function habitRow(h){
   if (isMood(h)) return moodRow(h, today);
   if (isJournal(h)) return journalRow(h, today);
   if (isBudget(h)) return budgetRow(h, today);
+  if (isHours(h)) return hoursRow(h, today);
   if (isCounter(h)) return counterRow(h, today);
   const done  = !!h.days[today];
   const s     = statsFor(h);
@@ -3497,7 +3648,7 @@ function habitRow(h){
 
 // Values only mean something within a family, so switching families must drop history.
 const famOf = t => t==='score' ? 'score' : t==='time' ? 'time' : t==='mood' ? 'mood'
-  : t==='journal' ? 'journal' : t==='budget' ? 'budget'
+  : t==='journal' ? 'journal' : t==='budget' ? 'budget' : t==='hours' ? 'hours'
   : (t==='plus'||t==='minus'||t==='plusminus') ? 'counter' : 'toggle';
 
 // Which types can have a direction. Toggles and the score have nothing to rank.
@@ -3517,8 +3668,52 @@ const segBtn = (t, label) =>
 /* Only a budget needs these, so they appear only for a budget. A period is chosen rather
    than typed because there are really only three answers, and two of them have a fixed
    idea of where they start: Monday, and the 1st. */
+/* Step one of making a card: what KIND is it. Nine buttons in a row plus every field the
+   card might need, all on screen at once, had become a wall - and the type is the single
+   decision that changes everything below it. So it gets the screen to itself, one row per
+   kind with a line saying what it does, and the rest of the form only appears once that
+   choice is made. Editing an existing card skips straight past this. */
+const CARD_KINDS = [
+  ['toggle',    'Tick',        'A simple daily tick.'],
+  ['plus',      'Counter +',   'Tap + each time. Glasses of water, pages read.'],
+  ['minus',     'Counter \u2212',   'Tap \u2212 each time. Slips you would rather avoid.'],
+  ['plusminus', 'Counter +/\u2212', 'Both buttons; the day is the running total.'],
+  ['time',      'Time of day', 'The first time of day something happened. A clock reading.'],
+  ['hours',     'Hours',       'Time added up as you go. 30m, then 1h, then another 20m.'],
+  ['mood',      'Mood',        'A slider from 1 to 10, as often as you like in a day.'],
+  ['journal',   'Journal',     'A box to write in. A sentence counts.'],
+  ['budget',    'Budget',      'An amount to spend over a period, counting down.'],
+  ['score',     'Day score',   'One computed card that tallies all the others.']
+];
+
+function kindChooser(){
+  const allowScore = !hasScore();
+  return '<div class="editor">'+
+    '<h3>New card</h3>'+
+    '<p class="hint" style="margin-bottom:14px">What kind of thing is it?</p>'+
+    '<div class="kinds">'+
+      CARD_KINDS.filter(k => k[0] !== 'score' || allowScore).map(k =>
+        '<button type="button" class="kind" onclick="setFormType(\''+k[0]+'\')">'+
+          '<span class="kindT">'+k[1]+'</span>'+
+          '<span class="kindD">'+k[2]+'</span>'+
+        '</button>').join('')+
+    '</div>'+
+    '<div class="acts"><button class="btnG" onclick="cancelEdit()">Cancel</button></div>'+
+  '</div>';
+}
+
 function budgetFields(){
   const per = form.period || 'week';
+  const hrs = form.type === 'hours';
+  if (hrs) return '<div class="fld">'+
+      '<label class="lbl" for="fTarget">Target <span class="opt">\u00b7 optional</span></label>'+
+      '<input id="fTarget" value="'+esc(form.target || '')+'" placeholder="40h">'+
+      '<p class="hint">How much to reach in one period \u2014 40h, 2h30, 90m. Leave it empty '+
+        'to just keep the log, and the card drops the target graph entirely.</p>'+
+    '</div>'+
+    (String(form.target||'').trim() ? periodFields(per, 'Counted from the day this card '+
+      'was made, so the cycle stays fixed.') : '')+
+    '';
   return '<div class="fld">'+
       '<label class="lbl" for="fBudget">Budget</label>'+
       '<div class="bFld">'+
@@ -3527,7 +3722,12 @@ function budgetFields(){
       '</div>'+
       '<p class="hint">The amount for one period. The card counts down from it.</p>'+
     '</div>'+
-    '<div class="fld">'+
+    periodFields(per, 'Counted from the day this card was made, so the cycle stays fixed.');
+}
+
+// Shared by both cycle cards - the reset rule is the same question either way.
+function periodFields(per, daysHint){
+  return '<div class="fld">'+
       '<label class="lbl">Resets</label>'+
       '<div class="picker">'+
         perBtn('week','Weekly')+ perBtn('month','Monthly')+ perBtn('days','Every n days')+
@@ -3540,14 +3740,16 @@ function budgetFields(){
         : '')+
       '<p class="hint">'+
         (per === 'month' ? 'Starts on the 1st of each month.'
-         : per === 'days' ? 'Counted from the day this card was made, so the cycle stays fixed.'
+         : per === 'days' ? daysHint
          : 'Starts every Monday.')+
       '</p>'+
     '</div>';
 }
 
 function typeHint(t){
-  return t==='budget' ? 'An amount to spend over a period, and every spend logged against '+
+  return t==='hours' ? 'Log time as you go \u2014 30m, then 1h, then another 20m \u2014 and the day '+
+      'adds up. A target is optional; set one and the card counts toward it.'
+    : t==='budget' ? 'An amount to spend over a period, and every spend logged against '+
       'it. The card shows what is left and how long it has to last. Recording nothing '+
       'spent still counts as recording.'
     : t==='journal' ? 'A box to write in. Anything at all counts — a sentence keeps '+
@@ -3563,26 +3765,26 @@ function typeHint(t){
     : 'A simple daily tick. Builds streaks, milestones and the warming background.';
 }
 
-const typeLabel = t => t==='budget' ? 'Budget'
+const typeLabel = t => t==='hours' ? 'Hours'
+  : t==='budget' ? 'Budget'
   : t==='journal' ? 'Journal'
   : t==='mood' ? 'Mood · 1–10'
   : t==='plus' ? 'Counter · +'
   : t==='minus' ? 'Counter · −'
   : t==='plusminus' ? 'Counter · +/−'
-  : t==='time' ? 'First time of day'
+  : t==='time' ? 'Time of day'
   : t==='score' ? 'Day score'
   : 'Tick';
 
 function editorHTML(title){
+  if (!form.type) return kindChooser();          // step one: pick a kind, nothing else
   const eh = (editing && editing !== 'new') ? data.habits.find(x => x.id === editing) : null;
   const allowScore = !hasScore() || form.type === 'score';   // at most one score card
   const seg = '<div class="fld">'+
       '<label class="lbl">How you log it</label>'+
-      '<div class="picker">'+
-        segBtn('toggle','Tick')+ segBtn('plus','+')+ segBtn('minus','−')+ segBtn('plusminus','+/−')+
-        segBtn('time','Time')+ segBtn('mood','Mood')+ segBtn('journal','Journal')+
-        segBtn('budget','Budget')+
-        (allowScore ? segBtn('score','Score') : '')+
+      '<div class="kindNow">'+
+        '<span class="kindT">'+esc(typeLabel(form.type))+'</span>'+
+        '<button type="button" class="link" onclick="reType()">Change</button>'+
       '</div>'+
       '<p class="hint">'+typeHint(form.type)+'</p>'+
       ((eh && famOf(eh.type||'toggle') !== famOf(form.type) && Object.keys(eh.days||{}).length)
@@ -3594,7 +3796,7 @@ function editorHTML(title){
         dirBtn('down', form.type==='time' ? 'Earlier is better' : 'Less is better')+
       '</div>' : '')+
     '</div>'+
-    (form.type === 'budget' ? budgetFields() : '');
+    ((form.type === 'budget' || form.type === 'hours') ? budgetFields() : '');
 
   if (form.type === 'score'){                                // stripped editor - nothing to name/cue
     return '<div class="editor">'+

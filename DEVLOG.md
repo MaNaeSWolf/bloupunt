@@ -2111,6 +2111,62 @@ Not certain, but the mechanism fits and there is no second candidate.
 
 ---
 
+### 2026-08-21 (later) — Hours, and choosing a card in two steps
+
+#### Hours
+
+Time added up as you go: 30m, then 1h, then another 20m, and the day is the sum. It is
+the Budget card with the sign flipped, so almost all of it is now shared code - one
+`cycleState` for the period arithmetic, one `cycleGraph` for the drawing, with the two
+cards supplying what they disagree about. The refactor was verified rather than assumed:
+the budget graph's rendered SVG is **byte-identical** before and after, 11,540 characters
+either way, and the only change to its state object is an added field.
+
+What they disagree about is direction, and it is every colour decision. Spending more is
+worse; working more is better. So the dot scale flips, the calendar ladder inverts, and
+the line that passes the target is drawn deep green rather than clay - **an Hours card has
+no clay in it at all**, because there is nothing bad to say about a long day's work.
+
+**The target is optional**, and absent means absent: no line, no dashed rule, no
+countdown. Verified as 41 SVG lines dropping to 15, with the stems and dots untouched. The
+card then reports what it does know - "5h today · 33h this week" - rather than inventing a
+goal nobody set.
+
+Typed durations parse as `8` (a bare number is hours, because the card is called Hours),
+`0.5`, `30m`, `90m`, `1h`, `1h30`, `1h 30m`, `1:30`. Guessing from magnitude - small means
+hours, large means minutes - would be wrong precisely when someone logs a real 90-minute
+stretch.
+
+**Naming.** The existing card is now **Time of day**, which is what it records: a clock
+reading, the first time something happened. Hours records a duration. The old label
+"Time" could have meant either, and with both cards on the same screen it had to stop.
+Type ids are untouched, so nothing migrates.
+
+#### Choosing a card
+
+Nine buttons in a row, then every field the card might need, all at once. The type is the
+one decision that changes everything below it, so it now gets the screen to itself: one
+row per kind with a line saying what it does, and the rest of the form appears only after
+the choice. Editing an existing card skips the step, and a "Change" link goes back to it
+without losing the name already typed.
+
+#### The patch-script trap, third occurrence
+
+`Q2` reached the shipped JavaScript from inside a triple-quoted block, exactly as `Q` did
+in v68 and `QU` in v69 - and this time **the guard added in v69 refused to build**, which
+is the first time this class of mistake was caught before deploy rather than after.
+Written up properly in the previous entry; the fix here was to stop using bare
+concatenation in those blocks at all and substitute a `@Q@` marker after the string is
+built, which cannot collide with anything.
+
+Verified live: the parser across nine formats; the chooser listing ten kinds with no other
+field on screen; Hours built through the real flow with a 40h weekly target giving 31h 30m
+logged, 8h 30m to go and 5h 43m a day; "1h30" typed into the card adding correctly;
+8h green against 1h amber; the target removed and the graph shedding its line and rule.
+→ `sw.js v71`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
