@@ -255,10 +255,15 @@
   .jBox::placeholder{color:#BFB9B0}
   .jActs{display:flex;gap:10px;margin-top:10px}
   .bRow{display:flex;align-items:center;gap:8px;margin-top:14px;flex-wrap:wrap}
-  .hmBox{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0}
-  .hmBox .hm{flex:1 1 40px;min-width:0;text-align:center}
-  .hmU{flex:0 0 auto;font-size:13px;color:var(--soft)}
-  .chip .hmBox{flex:1 1 130px}
+  .hmBox{display:flex;align-items:center;gap:5px;flex:0 0 auto;min-width:0}
+  .hmBox .hm{flex:0 0 50px;width:50px;min-width:0;text-align:center;padding:9px 4px}
+  .hmU{flex:0 0 auto;font-size:13px;color:var(--soft);margin-right:3px}
+  /* Everything from the first button rightward sits against the right edge. On the
+     budget card the amount field already absorbs the slack, so this changes nothing
+     there. */
+  .bRow .bAdd{margin-left:auto}
+  .chip .hmBox{flex:0 0 auto}
+  .chip .hmBox .hm{flex:0 0 44px;width:44px;padding:6px 4px}
   .spendIn{flex:1 1 90px;min-width:0;background:var(--bg);border:1px solid var(--faint);
     border-radius:10px;padding:9px 11px;font-family:inherit;font-size:14px;color:var(--ink)}
   .spendIn:focus{outline:none;border-color:var(--sage);background:var(--card)}
@@ -522,7 +527,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v73';
+const BUILD = 'bloupunt-v74';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -2680,7 +2685,7 @@ function hoursRow(h, today){
     '<div class="bRow">'+
       hoursBox(String(h.id))+
       '<button class="tNone bAdd" onclick="addSpend('+h.id+')">Add</button>'+
-      (logged ? '' : '<button class="chipBtn bNil" onclick="spendNothing('+h.id+')">None today</button>')+
+      (logged ? '' : '<button class="chipBtn bNil" onclick="spendNothing('+h.id+')">Nothing</button>')+
     '</div>'+
     riskBlock(risk) + hoursGraph(h) + expBlock +
   '</div>';
@@ -2736,7 +2741,7 @@ function budgetRow(h, today){
     '<div class="bRow">'+
       spendBox(String(h.id), ((h.cur||'R').trim()) + ' amount')+
       '<button class="tNone bAdd" onclick="addSpend('+h.id+')">Add</button>'+
-      (logged ? '' : '<button class="chipBtn bNil" onclick="spendNothing('+h.id+')">Nothing today</button>')+
+      (logged ? '' : '<button class="chipBtn bNil" onclick="spendNothing('+h.id+')">Nothing</button>')+
     '</div>'+
     riskBlock(risk) + budgetGraph(h) + expBlock +
   '</div>';

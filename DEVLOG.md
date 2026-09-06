@@ -2243,6 +2243,25 @@ card brings back its target and its period already selected. → `sw.js v73`.
 
 ---
 
+### 2026-08-21 (later) — Two digits do not need half a card
+
+The Hours row was set to grow: `flex:1 1 40px` on boxes that only ever hold two digits. So
+they ate the width, pushed Add and "None today" onto a line of their own, and left a card
+that was mostly empty input. Fixed width for a thing of fixed size, and everything from the
+first button rightward pinned to the right edge with a single `margin-left:auto`.
+
+That last rule is deliberately shared with the Budget row and deliberately does nothing
+there — the amount field already absorbs the slack, so its buttons were always at the
+right. Both rows now read the same way without either needing a special case: what you type
+on the left, what you press on the right.
+
+"None today" and "Nothing today" are both just **Nothing**. In a row that already says
+Add, the day is not in question.
+
+The card drops to 201px. → `sw.js v74`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
