@@ -297,10 +297,10 @@
     animation-timing-function:ease-in-out}
   /* A second that has passed. Stops breathing and holds, so the field fills as it goes. */
   .tdSpot.on{animation:none;opacity:1;background:var(--sageDeep)!important}
-  .tClock{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-    font-family:'Fraunces',Georgia,serif;font-size:30px;color:var(--ink);
-    background:rgba(247,244,239,.82);border-radius:12px;padding:4px 14px;
-    pointer-events:none;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+  /* Beside the button, not over the field. The graphic is the thing worth looking at; a
+     big number laid across it was competing with the only part that moves. */
+  .tClock{flex:0 0 auto;font-family:'Fraunces',Georgia,serif;font-size:17px;
+    color:var(--soft);font-variant-numeric:tabular-nums}
   .goBtn{flex:0 0 auto;background:var(--sage);color:#fff;border-radius:11px;
     padding:11px 20px;font-size:14px;font-weight:600;letter-spacing:.04em}
   .goBtn.stop{background:var(--bg);border:1px solid var(--faint);color:var(--clay);
@@ -567,7 +567,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v76';
+const BUILD = 'bloupunt-v77';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -1781,7 +1781,7 @@ window.setFormType = t => { grab(); form.type = t; if (t === 'time' && !form.dir
 window.setFormDir  = d => { grab(); form.dir = d; render(); };
 window.setFormPeriod = v => { grab(); form.period = v; render(); };
 window.pickSound = (kind, v) => {
-  grabTimer();
+  grab();                                  // the whole form, name included
   if (kind === 'end') form.endSnd = v; else form.runSnd = v;
   render();
   previewSound(kind, v);                 // hearing it is the only way to choose
@@ -1789,7 +1789,7 @@ window.pickSound = (kind, v) => {
 // The duration boxes are read straight from the DOM, so a re-render must not lose them.
 function grabTimer(){
   const g = id => { const el = document.getElementById(id); return el ? el.value : null; };
-  const mm = g('fMin'), ss = g('fSec');
+  const mm = g('fTmin'), ss = g('fTsec');
   if (mm !== null && ss !== null)
     form.secs = Math.max(5, (parseInt(mm,10)||0) * 60 + (parseInt(ss,10)||0));
 }
@@ -1973,11 +1973,10 @@ window.commit = () => {
   };
   if (payload.type === 'timer'){
     const g = id => { const el = document.getElementById(id); return el ? el.value : ''; };
-    const mm = parseInt(g('fMin'), 10) || 0, ss = parseInt(g('fSec'), 10) || 0;
-    payload.secs   = Math.max(5, Math.min(7200, mm * 60 + ss));
+    const mm = parseInt(g('fTmin'), 10) || 0, ss = parseInt(g('fTsec'), 10) || 0;
+    payload.secs   = Math.max(5, Math.min(7200, mm * 60 + ss)) || timerSecs(form);
     payload.endSnd = form.endSnd || 'chime';
     payload.runSnd = form.runSnd || 'none';
-    payload.minimum = '';                     // fMin is the minutes box on this card
   }
   // Stored only when it says something. All seven on is the default, and writing it out
   // would put a redundant array into every card and every sync payload.
@@ -2205,6 +2204,10 @@ window.importData = () => {
 // Keep in-progress form text across re-renders
 function grab(){
   const g = id => { const el = document.getElementById(id); return el ? el.value : null; };
+  /* fMin is the habit floor. The timer's minutes box used to share that id, so on a timer
+     card this map wrote a number into `minimum` - and worse, pickSound had to skip grab()
+     entirely to avoid it, which is why choosing a chime threw away the name you had just
+     typed. The timer boxes are fTmin/fTsec now and grab() is safe to call from anywhere. */
   const map = { fName:'name', fCue:'cue', fStack:'stack', fMin:'minimum',
                 fBudget:'budget', fPdays:'pdays', fCur:'cur', fTarget:'target' };
   for (const [id,key] of Object.entries(map)){
@@ -2212,6 +2215,7 @@ function grab(){
     if (v !== null) form[key] = v;
   }
   grabJournals();
+  grabTimer();
 }
 
 /* The journal boxes are always on screen now, so ANY re-render - a sync landing, a peek
@@ -2362,10 +2366,17 @@ function playEndSound(kind){
     ping(ctx, 1046, n,       1.3, 0.26);
     ping(ctx, 880,  n + 0.22, 1.5, 0.24);
     ping(ctx, 659,  n + 0.46, 2.2, 0.26);
-  } else if (kind === 'gong'){                 // low, long, slightly detuned
-    ping(ctx, 131, n,        4.5, 0.34);
-    ping(ctx, 196, n + 0.02, 3.8, 0.18);
-    ping(ctx, 262, n + 0.05, 2.6, 0.09);
+  } else if (kind === 'gong'){
+    /* The first version was built on a 131Hz fundamental, which measured fine offline and
+       was inaudible in practice: phone and laptop speakers roll off steeply below a few
+       hundred Hz, so the note was there and the hardware could not move enough air to
+       play it. Rebuilt an octave and a half up on inharmonic partials - the long decay and
+       the slightly-out-of-tune overtones are what make a gong sound like one, not the
+       depth of the fundamental. */
+    ping(ctx, 196, n,        4.6, 0.30);
+    ping(ctx, 293, n + 0.01, 3.9, 0.20);
+    ping(ctx, 437, n + 0.03, 3.0, 0.13);   // deliberately not 440
+    ping(ctx, 621, n + 0.05, 2.2, 0.07);
   } else if (kind === 'alarm'){                // six insistent pulses
     for (let i=0;i<6;i++){
       ping(ctx, 990, n + i*0.24, 0.16, 0.26, 'triangle');
@@ -2988,6 +2999,37 @@ const timerLeft = () => timerRun
    shrinking further. A 40-minute timer lands there: 2400 seconds across ~1700 cells, two
    seconds a dot, and it fills just as smoothly. */
 const DOT_MIN = 4, DOT_MAX = 11, GRID_H = 132;
+
+/* Which dot solidifies next.
+
+   Short timers fill in reading order, because with twenty dots you can see the row
+   advancing and that IS the progress. Past half a minute that stops working - filling
+   top-left to bottom-right turns a field into a loading bar, and what you want is the box
+   quietly becoming greener. So over 30 seconds the order is shuffled.
+
+   Seeded from `startedAt`, which is already stored, so the shuffle is reproducible: the
+   field is rebuilt on every render and has to come back in the SAME order or the dots
+   would reshuffle under you every time anything else on the screen changed. */
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let x = Math.imul(a ^ a >>> 15, 1 | a);
+    x = x + Math.imul(x ^ x >>> 7, 61 | x) ^ x;
+    return ((x ^ x >>> 14) >>> 0) / 4294967296;
+  };
+}
+let orderCache = { key:'', arr:null };
+function fillOrder(run, n, secs){
+  if (!run || secs <= 30) return null;
+  const key = run.startedAt + ':' + n;
+  if (orderCache.key === key) return orderCache.arr;
+  const rnd = mulberry32(run.startedAt | 0);
+  const a = new Array(n);
+  for (let i=0;i<n;i++) a[i] = i;
+  for (let i=n-1;i>0;i--){ const j = Math.floor(rnd()*(i+1)); const s=a[i]; a[i]=a[j]; a[j]=s; }
+  orderCache = { key, arr:a };
+  return a;
+}
 function timerGrid(secs, w){
   const W = Math.max(120, w || 300);
   let size = DOT_MAX, cols = 1, rows = 1, cells = 1, fit = false;
@@ -3038,10 +3080,14 @@ function timerPaint(){
   const per = +f.dataset.per || 1, n = +f.dataset.n || 1;
   const doneDots = Math.min(n, Math.floor((timerRun.secs - left) / per));
   const kids = f.children;
-  for (let i = 0; i < kids.length; i++){
-    const on = i < doneDots;
-    if (on !== kids[i].classList.contains('on')) kids[i].classList.toggle('on', on);
-  }
+  const order = fillOrder(timerRun, n, timerRun.secs);
+  const at = i => kids[order ? order[i] : i];
+  /* Only the difference is touched. A freshly rendered field carries no `painted`, so it
+     catches itself up from zero in one pass and then does one dot at a time after that. */
+  const painted = +f.dataset.painted || 0;
+  if (doneDots > painted)      for (let i = painted; i < doneDots; i++) at(i).classList.add('on');
+  else if (doneDots < painted) for (let i = doneDots; i < painted; i++) at(i).classList.remove('on');
+  f.dataset.painted = doneDots;
 }
 
 async function takeWakeLock(){
@@ -3083,7 +3129,9 @@ function timerBegin(h){
     }
     timerPaint();
   }, 250);
-  expanded = h.id;                             // pressing GO opens the card around it
+  /* Deliberately does NOT expand. The field renders whenever a timer is live, outside
+     the expanded block, so GO shows the graphic and nothing else - the calendar and the
+     stats are still something you choose to open. */
 }
 
 /* Starting counts. Finishing is not the achievement being tracked - turning up to start is
@@ -3159,16 +3207,13 @@ function timerRow(h, today){
         '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
         '<div class="streak">'+sub+'</div>'+
       '</button>'+
+      (live ? '<span class="tClock" id="tclock'+h.id+'">'+fmtClock(timerLeft())+'</span>' : '')+
       '<button class="goBtn'+(live?' stop':'')+'" onclick="timerGo('+h.id+')">'+
         (live ? 'Stop' : 'GO')+'</button>'+
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
-    (live
-      ? '<div class="tWrap">'+timerField(h)+
-          '<div class="tClock" id="tclock'+h.id+'">'+fmtClock(timerLeft())+'</div>'+
-        '</div>'
-      : '')+
+    (live ? '<div class="tWrap">'+timerField(h)+'</div>' : '')+
     riskBlock(risk) + chainStrip(h) + expBlock +
   '</div>';
 }
@@ -4300,9 +4345,9 @@ function timerFields(){
   return '<div class="fld">'+
       '<label class="lbl">How long</label>'+
       '<div class="hmBox">'+
-        '<input id="fMin" class="spendIn hm" inputmode="numeric" value="'+Math.floor(secs/60)+'" '+
+        '<input id="fTmin" class="spendIn hm" inputmode="numeric" value="'+Math.floor(secs/60)+'" '+
           'aria-label="Minutes" placeholder="25"><span class="hmU">m</span>'+
-        '<input id="fSec" class="spendIn hm" inputmode="numeric" value="'+(secs%60)+'" '+
+        '<input id="fTsec" class="spendIn hm" inputmode="numeric" value="'+(secs%60)+'" '+
           'aria-label="Seconds" placeholder="0"><span class="hmU">s</span>'+
       '</div>'+
       '<p class="hint">Anything from a few seconds to an hour.</p>'+

@@ -2365,6 +2365,50 @@ bearing. → `sw.js v76`.
 
 ---
 
+### 2026-09-18 (later) — Five timer edits, and a gong that was never silent
+
+**The field fills randomly past 30 seconds.** Under that it still fills in reading order,
+because with twenty dots the advancing row IS the progress. Longer than that and filling
+top-left to bottom-right turns a field into a loading bar, when what it should do is
+quietly become greener. Seeded from `startedAt`, which is already stored — the field is
+rebuilt on every render and has to come back in the *same* order, or the dots would
+reshuffle under you whenever anything else on screen changed. Verified stable across
+repeated renders.
+
+The paint got cheaper on the way: it now applies only the difference rather than checking
+all 1500 dots, so a tick is one `classList.add` in the steady state. A freshly rendered
+field carries no `painted` marker and catches itself up from zero in one pass.
+
+**The clock moved beside Stop, at 17px.** A big number laid across the field was competing
+with the only part of the card that moves.
+
+**GO no longer expands the card.** The field renders whenever a timer is live, outside the
+expanded block, so starting one shows the graphic and nothing else — the calendar and stats
+stay something you choose to open.
+
+**Picking a sound wiped the name**, and the cause is worth recording. The timer's minutes
+box was given `id="fMin"` — already owned by the habit floor. So `grab()` would have
+written a number into `minimum` on a timer card, and to avoid that `pickSound` skipped
+`grab()` altogether and called a narrow helper instead — which is what threw away the name
+you had just typed. The real fix was the id collision: the boxes are `fTmin`/`fTsec` now,
+`grab()` is safe to call from anywhere, and it also captures the duration so every existing
+caller preserves it. A workaround for a name clash had quietly become a data-loss bug.
+
+**The gong was never silent.** It was built on a 131Hz fundamental, which measured fine
+offline — 0.52 peak — and could not be heard, because phone and laptop speakers roll off
+steeply below a few hundred Hz. The note was there and the hardware could not move enough
+air to play it. Rebuilt an octave and a half up on deliberately inharmonic partials (196,
+293, 437, 621 — the 437 is not 440 on purpose), since the long decay and the
+slightly-out-of-tune overtones are what make a gong sound like one, not the depth of the
+fundamental. Measured band energy between 300Hz and 1.2kHz: **10,930 against 792**, about
+fourteen times more where a small speaker can actually work.
+
+Worth generalising: "measured fine, inaudible in practice" means the measurement was of
+the wrong thing. Peak amplitude says nothing about whether a speaker can reproduce the
+band it sits in. → `sw.js v77`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
