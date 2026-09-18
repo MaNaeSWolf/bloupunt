@@ -274,6 +274,13 @@
   .streak .over{color:var(--clay);font-weight:600}
   .streak .hit{color:var(--sageDeep);font-weight:600}
   .sv.bad{color:var(--clay)}
+  .mCard.archived{opacity:.55}
+  .mCard.archived .mWarn{display:none}
+  .rmBox{display:flex;flex-direction:column;gap:8px;align-items:stretch}
+  .rmQ{font-size:13px;color:var(--soft)}
+  .rmBtn{display:block;width:100%;text-align:left;padding:10px 14px;font-size:13.5px}
+  .rmSub{display:block;font-size:11.5px;opacity:.75;font-weight:400;margin-top:2px}
+  .rmKeep{align-self:flex-start;padding:8px 18px;font-size:13px}
   .dowPick{display:flex;gap:5px}
   .dowBtn{flex:1;min-width:0;background:var(--bg);border:1px solid var(--faint);
     color:var(--soft);padding:9px 0;font-size:12.5px;font-weight:500;border-radius:9px}
@@ -527,7 +534,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v74';
+const BUILD = 'bloupunt-v75';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -688,7 +695,7 @@ function dataSig(o){
     // produced identical signatures, so the winning side decided it had nothing to send
     // and quietly sat on the correction while the loser kept republishing the old name.
     h: (o.habits||[]).map(x => [x.id, x.name||'', x.type||'', x.dir||'', x.cue||'',
-                                x.stack||'', x.minimum||'', x.mAt||0,
+                                x.stack||'', x.minimum||'', x.mAt||0, x.hidden?1:0,
                                 Object.keys(x.days||{}).sort()]),
     s: Object.keys(o.seen||{}).sort(),
     p: Object.keys(o.paused||{}).sort(),
@@ -1039,6 +1046,22 @@ const fmtGap = m => {
   return r ? h + 'h ' + r + 'm' : h + 'h';
 };
 const hasScore  = () => data.habits.some(isScore);
+
+/* Hiding a card is not deleting it. The line this draws, and the whole reason the feature
+   exists, is between two questions:
+
+     "what do I have to do today"   -> the cards still in play. A hidden card must not sit
+                                       in the list, must not be counted in "3 of 5
+                                       recorded", and must never hold back an all-done day.
+     "what did I do"                -> everything that was ever logged. dayScore and
+                                       dayHasLog deliberately do NOT filter, so the points
+                                       a card earned stay earned and the score card can
+                                       still read the months it was part of.
+
+   So `liveHabits()` is for the present tense and `data.habits` is for the past. Getting
+   that backwards either loses history on hiding, or leaves a retired card quietly
+   demanding to be ticked. */
+const liveHabits = () => data.habits.filter(h => !h.hidden);
 // "Logged" == a record exists for that day. Toggle stores 1; a counter may store
 // 0 or a negative net and still counts, because the goal is simply to log.
 const has = (days, k) => days[k] !== undefined;
@@ -1363,7 +1386,7 @@ function statsFor(h){
 }
 
 function perfectStreak(){
-  const habits = data.habits.filter(h => !isScore(h));   // the score isn't a habit you do
+  const habits = liveHabits().filter(h => !isScore(h));  // the score isn't a habit you do
   if (!habits.length) return 0;
   const paused = data.paused || {};
   const allDone = d => habits.every(h => has(h.days||{}, keyFor(d)));        // recorded, any type
@@ -1391,7 +1414,7 @@ function shade(h, d){
 }
 
 function currentTier(){
-  const streaks = data.habits.filter(h => !isScore(h)).map(h => statsFor(h).streak);   // counters count too
+  const streaks = liveHabits().filter(h => !isScore(h)).map(h => statsFor(h).streak);  // counters count too
   const best = Math.max(perfectStreak(), 0, ...streaks);
   let t = TIERS[0];
   for (const x of TIERS) if (best >= x.min) t = x;
@@ -1433,11 +1456,11 @@ function checkMilestones(){
 window.toggle = (id, k) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  const wasAll = data.habits.filter(x=>!isScore(x)).length > 0 && data.habits.filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
+  const wasAll = liveHabits().filter(x=>!isScore(x)).length > 0 && liveHabits().filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
 
   if (h.days[k]) delete h.days[k]; else h.days[k] = 1;
 
-  const nowAll = data.habits.filter(x=>!isScore(x)).length > 0 && data.habits.filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
+  const nowAll = liveHabits().filter(x=>!isScore(x)).length > 0 && liveHabits().filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
   if (k === todayKey() && nowAll && !wasAll && data.habits.length > 1){
     flash = true;
     setTimeout(() => { flash = false; render(); }, 1400);
@@ -1460,9 +1483,9 @@ window.toggleExpand = id => { expanded = (expanded === id) ? null : id; dayEdit 
 window.bump = (id, k, delta) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  const wasAll = data.habits.filter(x=>!isScore(x)).length > 0 && data.habits.filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
+  const wasAll = liveHabits().filter(x=>!isScore(x)).length > 0 && liveHabits().filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
   h.days[k] = (h.days[k] || 0) + delta;    // net value persists even at 0 - the goal is to log
-  const nowAll = data.habits.filter(x=>!isScore(x)).length > 0 && data.habits.filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
+  const nowAll = liveHabits().filter(x=>!isScore(x)).length > 0 && liveHabits().filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
   if (k === todayKey() && nowAll && !wasAll && data.habits.length > 1){
     flash = true;
     setTimeout(() => { flash = false; render(); }, 1400);
@@ -1927,6 +1950,22 @@ window.moveHabit = (id, dir) => {
 
 window.askRemove = id => { confirm = id; render(); };
 window.cancelRemove = () => { confirm = null; render(); };
+/* Archive rather than erase. `hidden` is metadata, so the v47 sync rule already carries
+   it: whichever device touched the card last wins, and hiding stamps mAt like any edit. */
+window.hideHabit = id => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  h.hidden = 1; h.mAt = Date.now();
+  confirm = null; expanded = null;
+  save(); render();
+};
+window.showHabit = id => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  delete h.hidden; h.mAt = Date.now();
+  save(); render();
+};
+
 window.doRemove = id => {
   data.habits = data.habits.filter(h => h.id !== id);
   // Leave a tombstone. The merge is a union, so without one the next device to sync
@@ -3461,7 +3500,12 @@ function scoreRow(h){
 const WIN_DAYS = 91;                                    // 13 weeks, one screen of grid
 
 function scoreInsights(){
-  const habits = data.habits.filter(h => !isScore(h));
+  /* Visible cards only, and only because of what this list is USED for: "every habit
+     logged" and the perfect-day count, which ask whether the current set was completed.
+     The points totals on the same screen come from dayScore, which counts hidden cards -
+     so a retired card keeps its contribution to the score while no longer being something
+     a past day had to include to count as perfect. */
+  const habits = liveHabits().filter(h => !isScore(h));
   const paused = data.paused || {};
   if (!habits.length) return { sections: [], note: 'Add a card and this fills in.' };
   const first = firstLogAll();
@@ -4078,7 +4122,7 @@ function render(){
   if (meta) meta.setAttribute('content', tier.bg);
 
   const today = todayKey();
-  const habits = data.habits.filter(h => !isScore(h));    // the score is not a habit you complete
+  const habits = liveHabits().filter(h => !isScore(h));   // the score is not a habit you complete
   const chain = habits.filter(h => !isCounter(h));        // toggles only, for the ~3-habit cap
   const doneCount = habits.filter(h => has(h.days, today)).length;
   const allDone = habits.length > 0 && doneCount === habits.length;
@@ -4093,7 +4137,7 @@ function render(){
   let body;
 
   if (screen === 'today'){
-    if (!data.habits.length){
+    if (!liveHabits().length){
       body = '<div class="empty">'+
         '<p class="serif" style="font-size:17px;margin-bottom:8px">Start with one or two.</p>'+
         '<p style="font-size:13px;color:var(--soft);margin-bottom:22px;line-height:1.6">'+
@@ -4102,7 +4146,7 @@ function render(){
       '</div>';
     } else {
       body = '<div class="stack">'+
-        data.habits.map(habitRow).join('')+
+        liveHabits().map(habitRow).join('')+
         (chain.length < 4
           ? '<button class="btnDash" onclick="openNew()">+ Add a card</button>' : '')+
       '</div>';
@@ -4110,10 +4154,13 @@ function render(){
   } else {
     const cards = data.habits.map(h => {
       if (editing === h.id) return editorHTML('Edit card');
-      if (confirm === h.id) return '<div class="mCard danger" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'+
-        '<span style="flex:1;font-size:13px;color:var(--soft);min-width:150px">Remove \u201c'+esc(h.name)+'\u201d and its history?</span>'+
-        '<button class="btnRed" onclick="doRemove('+h.id+')">Remove</button>'+
-        '<button class="btnG" style="padding:8px 16px;font-size:13px" onclick="cancelRemove()">Keep</button>'+
+      if (confirm === h.id) return '<div class="mCard danger rmBox">'+
+        '<span class="rmQ">\u201c'+esc(h.name)+'\u201d</span>'+
+        '<button class="btnG rmBtn" onclick="hideHabit('+h.id+')">Hide card'+
+          '<span class="rmSub">Keeps its history and its points</span></button>'+
+        '<button class="btnRed rmBtn" onclick="doRemove('+h.id+')">Delete card and history'+
+          '<span class="rmSub">Gone for good, points included</span></button>'+
+        '<button class="btnG rmKeep" onclick="cancelRemove()">Keep</button>'+
       '</div>';
       const i = data.habits.indexOf(h), last = data.habits.length - 1;
       const reorder = data.habits.length > 1
@@ -4123,7 +4170,7 @@ function render(){
             '<button class="ordBtn" aria-label="Move '+esc(h.name)+' down" '+(i===last?'disabled':'')+
               ' onclick="moveHabit('+h.id+',1)">↓</button>'+
           '</div>' : '';
-      return '<div class="mCard"><div class="mTop">'+
+      return '<div class="mCard'+(h.hidden?' archived':'')+'"><div class="mTop">'+
         reorder +
         '<div style="flex:1;min-width:0">'+
           '<div style="font-size:16px;font-weight:500;margin-bottom:'+((h.cue||h.minimum||isCounter(h)||isScore(h))?'5px':'0')+'">'+esc(h.name)+'</div>'+
@@ -4131,9 +4178,12 @@ function render(){
           (h.minimum ? '<div class="mMeta">Floor: '+esc(h.minimum)+'</div>' : '')+
           (isCounter(h)||isTime(h) ? '<div class="mMeta">'+typeLabel(h.type)+(isDown(h)?' · lower is better':'')+'</div>' : '')+
           (isScore(h) ? '<div class="mMeta">Day score · computed from your habits</div>' : '')+
+          (h.hidden ? '<div class="mMeta">Hidden · history and points kept</div>' : '')+
           (!h.cue && !isCounter(h) && !isScore(h) && !isTime(h) ? '<div class="mWarn">No cue set</div>' : '')+
         '</div>'+
-        '<button class="link" onclick="openEdit('+h.id+')">Edit</button>'+
+        (h.hidden
+          ? '<button class="link" onclick="showHabit('+h.id+')">Restore</button>'
+          : '<button class="link" onclick="openEdit('+h.id+')">Edit</button>')+
         '<button class="link red" onclick="askRemove('+h.id+')">Remove</button>'+
       '</div></div>';
     }).join('');

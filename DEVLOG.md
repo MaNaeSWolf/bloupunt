@@ -2262,6 +2262,53 @@ The card drops to 201px. → `sw.js v74`.
 
 ---
 
+### 2026-09-18 — Hiding a card instead of erasing it
+
+Removing a card took its whole history with it, and its points out of the score. Sometimes
+that is what you want. Usually it is not: a habit you have stopped doing still happened,
+and the months it was part of should still read the way they read at the time.
+
+So Remove now asks which you meant:
+
+- **Hide card** — out of the Today list, greyed in Manage, one tap to Restore. History and
+  points kept.
+- **Delete card and history** — what it always did, tombstone included so sync cannot
+  resurrect it.
+- **Keep** — unchanged.
+
+**The whole feature is one distinction**, and getting it backwards would break either half:
+
+    "what do I have to do today"  -> liveHabits(). A hidden card must not sit in the list,
+                                     must not count in "3 of 5 recorded", and must never
+                                     hold back an all-done day or a celebration.
+    "what did I do"               -> data.habits. dayScore and dayHasLog deliberately do
+                                     NOT filter, so points stay earned and the score card
+                                     still reads the months that card was part of.
+
+Present tense uses `liveHabits()`; the past uses `data.habits`. Filter the wrong one and
+you either lose the history on hiding — which is the entire thing being fixed — or leave a
+retired card quietly demanding to be ticked.
+
+One judgement call worth recording. The score card's insights ask "was every habit logged"
+and count perfect days, and that list is now visible-only. It has to be: otherwise hiding
+a card would retroactively un-perfect past days it was never going to be logged on. The
+points totals on the same screen come from `dayScore`, which does count it. So a retired
+card keeps its contribution to the score without remaining a condition of a perfect day.
+Neither answer is free of distortion without tracking per-day membership, and this is the
+one that does not rewrite the past.
+
+`hidden` is metadata, so the v47 sync rule already carries it — hiding stamps `mAt` like
+any edit and the newest touch wins. Added to `dataSig` explicitly anyway, so the change
+propagates on its own merits rather than relying on the timestamp.
+
+Verified both paths against the same seeded data: with Gym hidden the day's score stays at
+4 and its twenty logged days stay in storage; deleting it instead drops the score to 3 and
+writes a tombstone. Restore returns it to the list with the score untouched. Hiding every
+card still leaves a usable screen with an add prompt, and the score card still reads the
+history behind it. → `sw.js v75`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
