@@ -2407,6 +2407,80 @@ Worth generalising: "measured fine, inaudible in practice" means the measurement
 the wrong thing. Peak amplitude says nothing about whether a speaker can reproduce the
 band it sits in. → `sw.js v77`.
 
+### 2026-09-18 (later) — Levelling four sounds, and two harnesses that lied
+
+Sean's report after living with the Timer card: the end sounds were good but soft, the
+running beds were all too loud **except sea, which was right**, and rain had no variation
+over a five-to-twenty-second window — "too close to just static."
+
+That "except sea" is the whole entry. Sea was the *quietest* bed by design intent and the
+only one that sounded correct, which means whatever the other three were levelled against
+was the wrong quantity.
+
+**RMS was the wrong quantity.** Measured that way the four came out white 0.0218, brown
+0.0282, rain 0.0284, sea 0.0385 — sea **highest of the four**, and sea is the one needing
+no change. Sea is brown noise lowpassed at 700Hz, where the ear is least sensitive and a
+small speaker least efficient, so it can carry far more amplitude for the same apparent
+volume. This is the gong lesson again (see the previous entry) in a different costume:
+amplitude is not loudness.
+
+**An ad-hoc band was also the wrong quantity.** The second attempt measured energy between
+1kHz and 5kHz — better in direction, but it discards everything below 1kHz, which is most
+of what sea and brown consist of, so it over-penalises anything bright. It produced gains
+roughly three times off the final ones.
+
+**Two harnesses had to be thrown away, and the reason generalises.** Both used Goertzel
+accumulated over half-million-sample renders, which drifts — the arithmetic degrades in a
+way that depends on the input, so the low-frequency probes that dominate sea and brown were
+quietly corrupt. The tell was a self-check: the audio chain is linear in gain, so doubling a
+gain must **exactly** quadruple measured loudness. The harness returned 0.57 where it owed
+4.00. Rebuilt on Welch — Hann-windowed 4096-point FFTs, averaged, so nothing accumulates —
+and the identity came back 4.0000.
+
+> If you ever measure audio here again: write the identity test first and make it fail
+> loudly. Two rounds of plausible-looking numbers were published to Sean before the check
+> existed, and both were wrong. A harness with no self-check is not a measurement.
+
+**The gains, A-weighted, with sea as the reference.** At the old values sea = 1.0, white was
+4.49x, brown 1.89x, rain 6.67x. So white 0.05 → **0.024**, brown 0.16 → **0.116**, rain
+0.07 → **0.027**, sea unchanged at 0.2. Re-rendered at those gains all four land within 3%
+of each other. Worth noting the cut to white and rain is about half amplitude, which is far
+more than "a bit loud" implies — flagged as such, since the measurement and the ear can
+still disagree and each is a one-number fix.
+
+**Rain got weather.** It had a single LFO at 0.17Hz on the lowpass, so it swept once every
+six seconds and did nothing else — the grain was right and there was no weather in it. Now
+four modulators at rates with no simple ratio between them: 0.11Hz and 0.19Hz on the
+lowpass (beating against each other), 0.071Hz on the highpass so the body thickens and
+thins, and the important one, 0.037Hz on a dedicated swell gain — half a minute per cycle,
+which is the difference between a noise source and rain that is getting heavier. The swell
+rides its own gain stage rather than `out.gain`, so the fade-in still has that to itself.
+
+Measured as loudness per 2-second window across a 40-second render — and because the noise
+buffer is exactly 2s long, every window contains the *same* source material, so any spread
+is purely the modulators:
+
+| | spread across windows | quietest → loudest |
+|---|---|---|
+| rain, before | 2.8% | 1.07x |
+| rain, now | 32.8% | 5.38x |
+| sea (for scale) | 72% | 30x |
+
+That 1.07x *is* Sean's complaint as a number. Rain now sits well below sea, which is right —
+rain should not heave like waves. The settings preview also runs **9 seconds for rain**
+instead of 2.2, because a two-second taste would demonstrate precisely the flatness it was
+changed to avoid.
+
+**End sounds up about half again**, with the peaks checked rather than assumed, since
+raising four partials that land within 50ms of each other is how you clip something that
+measured fine alone: chime 0.625, bell 0.516, gong 0.880. The gong's fundamental came back
+down from 0.44 to 0.40 — at 0.44 the four summed to 0.912, and 9% is not margin.
+
+The verification script reads the gains and partials **out of `index.html`** rather than
+from a copy of the intended values, and asserts the partial counts it parsed — because the
+first run of it silently mis-parsed sea's gain as white's and reported every bed 70x off,
+which looked exactly like a real bug in the app. → `sw.js v78`.
+
 ---
 
 ## Still to do / open items

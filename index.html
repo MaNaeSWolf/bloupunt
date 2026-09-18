@@ -567,7 +567,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v77';
+const BUILD = 'bloupunt-v78';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -2293,27 +2293,63 @@ function startRunSound(kind){
     src.buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate*1), ctx.sampleRate);  // silence
     out.gain.value = 0;
     src.connect(out);
+  /* The four gains below are matched by A-WEIGHTED LOUDNESS, with sea as the reference
+     because sea is the one that sounded right. Measured at the old gains, sea = 1.0:
+     white was 4.49x, brown 1.89x, rain 6.67x. Hence 0.024, 0.116, 0.027 here.
+
+     Three things worth knowing before touching these again.
+
+     RMS is useless for this. It ranked sea the LOUDEST of the four while sea was the one
+     that needed no change - because sea is lowpassed at 700Hz, where the ear is least
+     sensitive, so it can carry far more amplitude for the same apparent volume.
+
+     Ad-hoc bands are not much better. An attempt at "energy between 1kHz and 5kHz" threw
+     away everything below 1kHz, which is most of what sea and brown consist of, and
+     produced numbers three times off the ones here.
+
+     Whatever measures this must pass one check first: the chain is linear in gain, so
+     doubling a gain has to quadruple the measured loudness, exactly. A harness that fails
+     that identity is measuring its own arithmetic - which is what happened, twice. */
   } else if (kind === 'white'){
     src.buffer = noiseBuf(ctx, false);
     const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=8000;
     src.connect(lp); lp.connect(out); nodes.push(lp);
-    out.gain.value = 0.05;
+    out.gain.value = 0.024;
   } else if (kind === 'brown'){
     src.buffer = noiseBuf(ctx, true);
     const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1800;
     src.connect(lp); lp.connect(out); nodes.push(lp);
-    out.gain.value = 0.16;
+    out.gain.value = 0.116;
   } else if (kind === 'rain'){
-    // Bright, busy band with a gentle wobble on the top end for the sense of shower.
+    /* A single LFO on the filter gave one five-second sweep and nothing else, which is why
+       this read as static: the grain was right and there was no weather in it.
+
+       Three modulators now, at rates with no simple ratio between them - 0.19, 0.11 and
+       0.071 Hz - so the combination takes minutes to come back round rather than five
+       seconds. Two work the lowpass, for how hard the drops sound, and one works the
+       highpass so the body of it thickens and thins.
+
+       The fourth is the important one: a swell on the level itself at 0.037 Hz, a half
+       minute per cycle. That is the difference between a noise source and rain that is
+       getting heavier and then easing off. It rides on its own gain stage rather than on
+       `out`, so the fade-in below still has that to itself. */
     src.buffer = noiseBuf(ctx, false);
-    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=900;
-    const lp = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=6500;
-    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.17;
-    const lg  = ctx.createGain(); lg.gain.value = 1400;
-    lfo.connect(lg); lg.connect(lp.frequency); lfo.start();
-    src.connect(hp); hp.connect(lp); lp.connect(out);
-    nodes.push(hp, lp, lfo, lg);
-    out.gain.value = 0.07;
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=720;
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=4200;
+    const swell = ctx.createGain(); swell.gain.value = 0.85;
+    const mod = (rate, depth, target) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = rate; g.gain.value = depth;
+      o.connect(g); g.connect(target); o.start();
+      nodes.push(o, g);
+    };
+    mod(0.11,  2200, lp.frequency);            // ~9s, the main character
+    mod(0.19,   800, lp.frequency);            // ~5s, beating against the above
+    mod(0.071,  320, hp.frequency);            // ~14s, body coming and going
+    mod(0.037,  0.35, swell.gain);             // ~27s, the weather itself
+    src.connect(hp); hp.connect(lp); lp.connect(swell); swell.connect(out);
+    nodes.push(hp, lp, swell);
+    out.gain.value = 0.027;                    // x0.85 average swell = sea's loudness
   } else {                                     // sea
     // Low wash with a slow swell - the LFO is on gain, not the filter, so it breathes.
     src.buffer = noiseBuf(ctx, true);
@@ -2359,13 +2395,16 @@ function playEndSound(kind){
   const ctx = audioCtx();
   if (!ctx || kind === 'none') return;
   const n = ctx.currentTime + 0.02;
+  /* All four raised about half again. They have to carry from a pocket and over a running
+     bed, and there was headroom to do it with: the loudest of them still peaks under 0.8,
+     so nothing clips. */
   if (kind === 'chime'){                       // one bell and its fifth
-    ping(ctx, 880,  n, 1.8, 0.30);
-    ping(ctx, 1320, n + 0.01, 1.4, 0.13);
+    ping(ctx, 880,  n, 1.8, 0.46);
+    ping(ctx, 1320, n + 0.01, 1.4, 0.20);
   } else if (kind === 'bell'){                 // three descending
-    ping(ctx, 1046, n,       1.3, 0.26);
-    ping(ctx, 880,  n + 0.22, 1.5, 0.24);
-    ping(ctx, 659,  n + 0.46, 2.2, 0.26);
+    ping(ctx, 1046, n,       1.3, 0.40);
+    ping(ctx, 880,  n + 0.22, 1.5, 0.37);
+    ping(ctx, 659,  n + 0.46, 2.2, 0.40);
   } else if (kind === 'gong'){
     /* The first version was built on a 131Hz fundamental, which measured fine offline and
        was inaudible in practice: phone and laptop speakers roll off steeply below a few
@@ -2373,14 +2412,14 @@ function playEndSound(kind){
        play it. Rebuilt an octave and a half up on inharmonic partials - the long decay and
        the slightly-out-of-tune overtones are what make a gong sound like one, not the
        depth of the fundamental. */
-    ping(ctx, 196, n,        4.6, 0.30);
-    ping(ctx, 293, n + 0.01, 3.9, 0.20);
-    ping(ctx, 437, n + 0.03, 3.0, 0.13);   // deliberately not 440
-    ping(ctx, 621, n + 0.05, 2.2, 0.07);
+    ping(ctx, 196, n,        4.6, 0.40);   // the four together peak at 0.87; leave the margin
+    ping(ctx, 293, n + 0.01, 3.9, 0.30);
+    ping(ctx, 437, n + 0.03, 3.0, 0.20);   // deliberately not 440
+    ping(ctx, 621, n + 0.05, 2.2, 0.11);
   } else if (kind === 'alarm'){                // six insistent pulses
     for (let i=0;i<6;i++){
-      ping(ctx, 990, n + i*0.24, 0.16, 0.26, 'triangle');
-      ping(ctx, 660, n + i*0.24, 0.16, 0.18, 'triangle');
+      ping(ctx, 990, n + i*0.24, 0.16, 0.40, 'triangle');
+      ping(ctx, 660, n + i*0.24, 0.16, 0.28, 'triangle');
     }
   }
 }
@@ -2391,7 +2430,10 @@ function previewSound(kind, v){
   if (kind === 'end'){ playEndSound(v); return; }
   if (v === 'none') return;                    // nothing to hear, and honest about it
   previewStop = startRunSound(v);
-  setTimeout(() => { if (previewStop){ previewStop(); previewStop = null; } }, 2200);
+  /* Rain gets a longer taste. Its slowest modulator is half a minute per cycle, so a
+     two-second preview would demonstrate precisely the static it was changed to avoid. */
+  const taste = v === 'rain' ? 9000 : 2200;
+  setTimeout(() => { if (previewStop){ previewStop(); previewStop = null; } }, taste);
 }
 
 /* ═══════════════ RENDER ═══════════════ */
