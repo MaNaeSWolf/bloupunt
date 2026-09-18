@@ -281,6 +281,39 @@
   .rmBtn{display:block;width:100%;text-align:left;padding:10px 14px;font-size:13.5px}
   .rmSub{display:block;font-size:11.5px;opacity:.75;font-weight:400;margin-top:2px}
   .rmKeep{align-self:flex-start;padding:8px 18px;font-size:13px}
+  /* The timer field. Every dot breathes on its own schedule - the duration and a negative
+     delay are set inline per dot, so nothing pulses in unison. Only `opacity` is animated,
+     which the compositor handles without touching layout; animating size or colour here
+     would mean a thousand reflows a second. */
+  @keyframes tdBeat{ 0%,100%{opacity:.16} 50%{opacity:.85} }
+  .tWrap{position:relative;margin-top:14px}
+  .tField{display:flex;flex-wrap:wrap;align-content:flex-start;overflow:hidden;
+    border-radius:12px;background:var(--bg);padding:7px}
+  /* No will-change here on purpose. It is a request for a compositor layer, and asking
+     for fifteen hundred of them on a phone spends more GPU memory than the animation
+     saves - opacity is composited without the hint anyway. */
+  .tdSpot{display:block;border-radius:50%;flex:0 0 auto;opacity:.16;
+    animation-name:tdBeat;animation-iteration-count:infinite;
+    animation-timing-function:ease-in-out}
+  /* A second that has passed. Stops breathing and holds, so the field fills as it goes. */
+  .tdSpot.on{animation:none;opacity:1;background:var(--sageDeep)!important}
+  .tClock{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    font-family:'Fraunces',Georgia,serif;font-size:30px;color:var(--ink);
+    background:rgba(247,244,239,.82);border-radius:12px;padding:4px 14px;
+    pointer-events:none;font-variant-numeric:tabular-nums;letter-spacing:.01em}
+  .goBtn{flex:0 0 auto;background:var(--sage);color:#fff;border-radius:11px;
+    padding:11px 20px;font-size:14px;font-weight:600;letter-spacing:.04em}
+  .goBtn.stop{background:var(--bg);border:1px solid var(--faint);color:var(--clay);
+    font-weight:500;letter-spacing:0}
+  .row.ticking{border-color:#CBDCCD}
+  /* Five synthesised options, each one tappable to hear it. */
+  .sndPick{display:flex;flex-wrap:wrap;gap:5px}
+  .sndBtn{flex:1 1 30%;min-width:88px;background:var(--bg);border:1px solid var(--faint);
+    color:var(--soft);padding:9px 6px;font-size:12.5px;font-weight:500;border-radius:9px}
+  .sndBtn.on{background:var(--sage);border-color:var(--sage);color:#fff}
+  @media (prefers-reduced-motion: reduce){
+    .tdSpot{animation:none;opacity:.3}
+  }
   .dowPick{display:flex;gap:5px}
   .dowBtn{flex:1;min-width:0;background:var(--bg);border:1px solid var(--faint);
     color:var(--soft);padding:9px 0;font-size:12.5px;font-weight:500;border-radius:9px}
@@ -534,7 +567,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v75';
+const BUILD = 'bloupunt-v76';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -876,6 +909,27 @@ const isHours   = h => h.type === 'hours';
    thing it does NOT share is direction - spending more is worse and working more is
    better, so every colour decision is the mirror of the budget's. */
 const isCycle   = h => isBudget(h) || isHours(h);
+const isTimer   = h => h.type === 'timer';
+
+/* A timer card records how often you STARTED one, not how long it ran. So `days[k]` is a
+   count and nothing else - stopping early takes nothing away, because showing up to start
+   is the whole act being tracked. That also means the week strip is an ordinary counter
+   strip: more starts, greener. */
+const TIMER_DEF = 1500;                       // 25 minutes
+const END_SOUNDS = [
+  ['chime', 'Soft chime'], ['bell', 'Bell'], ['gong', 'Gong'],
+  ['alarm', 'Alarm'],      ['none', 'Silent']
+];
+const RUN_SOUNDS = [
+  ['none', 'Silent'], ['white', 'White noise'], ['brown', 'Soft static'],
+  ['rain', 'Rain'],   ['sea', 'Sea']
+];
+const timerSecs = h => Math.max(5, Math.round(+h.secs || TIMER_DEF));
+// m:ss for anything under an hour, which is every timer anyone sets.
+const fmtClock = s => {
+  const a = Math.max(0, Math.round(s));
+  return Math.floor(a/60) + ':' + String(a % 60).padStart(2, '0');
+};
 
 /* Days a card does not apply to. A weekday habit should not be accused of missing every
    Saturday, and its streak should not die on Friday night. `dows` is seven flags starting
@@ -1726,6 +1780,19 @@ window.setDayNone = (id, k) => {
 window.setFormType = t => { grab(); form.type = t; if (t === 'time' && !form.dir) form.dir = 'up'; render(); };
 window.setFormDir  = d => { grab(); form.dir = d; render(); };
 window.setFormPeriod = v => { grab(); form.period = v; render(); };
+window.pickSound = (kind, v) => {
+  grabTimer();
+  if (kind === 'end') form.endSnd = v; else form.runSnd = v;
+  render();
+  previewSound(kind, v);                 // hearing it is the only way to choose
+};
+// The duration boxes are read straight from the DOM, so a re-render must not lose them.
+function grabTimer(){
+  const g = id => { const el = document.getElementById(id); return el ? el.value : null; };
+  const mm = g('fMin'), ss = g('fSec');
+  if (mm !== null && ss !== null)
+    form.secs = Math.max(5, (parseInt(mm,10)||0) * 60 + (parseInt(ss,10)||0));
+}
 // Back to step one. Keeps the name already typed - only the kind is being reconsidered.
 window.reType = () => { grab(); form.type = null; render(); };
 window.toggleDow = i => {
@@ -1863,6 +1930,7 @@ window.doClearHist     = () => {
 window.openNew = () => {
   form = { name:'', cue:'', stack:'', minimum:'', type:null, dir:'up',
            budget:'', target:'', period:'week', pdays:7, cur:'R',
+           secs:TIMER_DEF, endSnd:'chime', runSnd:'none',
            dows:[1,1,1,1,1,1,1] };
   editing = 'new'; confirm = null; screen = 'manage'; render();
 };
@@ -1874,6 +1942,7 @@ window.openEdit = id => {
            type:h.type||'toggle', dir:h.dir||'up',
            budget:h.budget||'', target:h.target?fmtGap(h.target):'',
            period:h.period||'week', pdays:h.pdays||7, cur:h.cur||'R',
+           secs:timerSecs(h), endSnd:h.endSnd||'chime', runSnd:h.runSnd||'none',
            dows:(h.dows && h.dows.length===7) ? h.dows.slice() : [1,1,1,1,1,1,1] };
   editing = id; confirm = null; clearHist = null; render();
 };
@@ -1902,6 +1971,14 @@ window.commit = () => {
     type:    form.type || 'toggle',
     dir:     form.dir || 'up'
   };
+  if (payload.type === 'timer'){
+    const g = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+    const mm = parseInt(g('fMin'), 10) || 0, ss = parseInt(g('fSec'), 10) || 0;
+    payload.secs   = Math.max(5, Math.min(7200, mm * 60 + ss));
+    payload.endSnd = form.endSnd || 'chime';
+    payload.runSnd = form.runSnd || 'none';
+    payload.minimum = '';                     // fMin is the minutes box on this card
+  }
   // Stored only when it says something. All seven on is the default, and writing it out
   // would put a redundant array into every card and every sync payload.
   const dw = (form.dows && form.dows.length === 7) ? form.dows.map(x => x ? 1 : 0) : null;
@@ -2156,6 +2233,154 @@ function restoreJournal(){
   if (!el) { jFocus = null; return; }
   el.focus();
   try { el.setSelectionRange(jSel, jSel); } catch(e){}
+}
+
+/* ═══════════════ SOUND ═══════════════
+
+   Every sound here is generated. There are no audio files and there is not going to be
+   one: this app is a single HTML document that has to keep working when opened from a
+   file:// URL years from now, and a few megabytes of rain recording would end that.
+
+   So the honest description of what these are: white and brown noise are exactly what
+   they say, and "rain" and "sea" are that same noise shaped by filters and a slow swell.
+   They are suggestive rather than convincing - closer to a sound machine than a field
+   recording - and that is the trade being made on purpose.
+
+   One AudioContext, created on the first real gesture, because browsers refuse to start
+   one otherwise. */
+let AC = null, runNode = null, previewStop = null;
+
+function audioCtx(){
+  const C = window.AudioContext || window.webkitAudioContext;
+  if (!C) return null;
+  if (!AC) { try { AC = new C(); } catch(e){ return null; } }
+  if (AC.state === 'suspended') AC.resume().catch(()=>{});
+  return AC;
+}
+
+// A couple of seconds of noise, looped. Brown is white run through a leaky integrator,
+// which is what gives it the low, soft character rather than white's hiss.
+function noiseBuf(ctx, brown){
+  const len = Math.floor(ctx.sampleRate * 2);
+  const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  if (brown){
+    let last = 0;
+    for (let i=0;i<len;i++){ const w = Math.random()*2-1; last = (last + 0.02*w)/1.02; d[i] = last*3.2; }
+  } else {
+    for (let i=0;i<len;i++) d[i] = Math.random()*2-1;
+  }
+  return buf;
+}
+
+/* The running bed. Returns a stop function, or null for silence.
+   'none' still plays a silent loop: it costs nothing and a tab with audio playing is
+   treated more kindly by the browser than one sitting idle. */
+function startRunSound(kind){
+  const ctx = audioCtx();
+  if (!ctx) return null;
+  const out = ctx.createGain();
+  out.connect(ctx.destination);
+  const src = ctx.createBufferSource();
+  src.loop = true;
+  const nodes = [src, out];
+
+  if (kind === 'none'){
+    src.buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate*1), ctx.sampleRate);  // silence
+    out.gain.value = 0;
+    src.connect(out);
+  } else if (kind === 'white'){
+    src.buffer = noiseBuf(ctx, false);
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=8000;
+    src.connect(lp); lp.connect(out); nodes.push(lp);
+    out.gain.value = 0.05;
+  } else if (kind === 'brown'){
+    src.buffer = noiseBuf(ctx, true);
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=1800;
+    src.connect(lp); lp.connect(out); nodes.push(lp);
+    out.gain.value = 0.16;
+  } else if (kind === 'rain'){
+    // Bright, busy band with a gentle wobble on the top end for the sense of shower.
+    src.buffer = noiseBuf(ctx, false);
+    const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=900;
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=6500;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.17;
+    const lg  = ctx.createGain(); lg.gain.value = 1400;
+    lfo.connect(lg); lg.connect(lp.frequency); lfo.start();
+    src.connect(hp); hp.connect(lp); lp.connect(out);
+    nodes.push(hp, lp, lfo, lg);
+    out.gain.value = 0.07;
+  } else {                                     // sea
+    // Low wash with a slow swell - the LFO is on gain, not the filter, so it breathes.
+    src.buffer = noiseBuf(ctx, true);
+    const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=700;
+    const swell = ctx.createGain(); swell.gain.value = 0.55;
+    const lfo = ctx.createOscillator(); lfo.frequency.value = 0.09;
+    const lg  = ctx.createGain(); lg.gain.value = 0.42;
+    lfo.connect(lg); lg.connect(swell.gain); lfo.start();
+    src.connect(lp); lp.connect(swell); swell.connect(out);
+    nodes.push(lp, swell, lfo, lg);
+    out.gain.value = 0.2;
+  }
+
+  // Fade in, so nothing ever starts with a click in your ear.
+  const g0 = out.gain.value;
+  out.gain.setValueAtTime(0, ctx.currentTime);
+  out.gain.linearRampToValueAtTime(g0, ctx.currentTime + 0.8);
+  src.start();
+
+  return () => {
+    try {
+      out.gain.cancelScheduledValues(ctx.currentTime);
+      out.gain.setValueAtTime(out.gain.value, ctx.currentTime);
+      out.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.4);
+      setTimeout(() => nodes.forEach(n => { try { n.stop ? n.stop() : n.disconnect(); } catch(e){} }), 600);
+    } catch(e){}
+  };
+}
+
+// A struck tone: sharp attack, exponential decay. Everything that dings is built from this.
+function ping(ctx, freq, at, dur, vol, type){
+  const o = ctx.createOscillator(), g = ctx.createGain();
+  o.type = type || 'sine';
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(0, at);
+  g.gain.linearRampToValueAtTime(vol, at + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+  o.connect(g); g.connect(ctx.destination);
+  o.start(at); o.stop(at + dur + 0.05);
+}
+
+function playEndSound(kind){
+  const ctx = audioCtx();
+  if (!ctx || kind === 'none') return;
+  const n = ctx.currentTime + 0.02;
+  if (kind === 'chime'){                       // one bell and its fifth
+    ping(ctx, 880,  n, 1.8, 0.30);
+    ping(ctx, 1320, n + 0.01, 1.4, 0.13);
+  } else if (kind === 'bell'){                 // three descending
+    ping(ctx, 1046, n,       1.3, 0.26);
+    ping(ctx, 880,  n + 0.22, 1.5, 0.24);
+    ping(ctx, 659,  n + 0.46, 2.2, 0.26);
+  } else if (kind === 'gong'){                 // low, long, slightly detuned
+    ping(ctx, 131, n,        4.5, 0.34);
+    ping(ctx, 196, n + 0.02, 3.8, 0.18);
+    ping(ctx, 262, n + 0.05, 2.6, 0.09);
+  } else if (kind === 'alarm'){                // six insistent pulses
+    for (let i=0;i<6;i++){
+      ping(ctx, 990, n + i*0.24, 0.16, 0.26, 'triangle');
+      ping(ctx, 660, n + i*0.24, 0.16, 0.18, 'triangle');
+    }
+  }
+}
+
+// Settings preview. Running beds get a two-second taste, then stop themselves.
+function previewSound(kind, v){
+  if (previewStop){ previewStop(); previewStop = null; }
+  if (kind === 'end'){ playEndSound(v); return; }
+  if (v === 'none') return;                    // nothing to hear, and honest about it
+  previewStop = startRunSound(v);
+  setTimeout(() => { if (previewStop){ previewStop(); previewStop = null; } }, 2200);
 }
 
 /* ═══════════════ RENDER ═══════════════ */
@@ -2727,6 +2952,224 @@ function hoursRow(h, today){
       (logged ? '' : '<button class="chipBtn bNil" onclick="spendNothing('+h.id+')">Nothing</button>')+
     '</div>'+
     riskBlock(risk) + hoursGraph(h) + expBlock +
+  '</div>';
+}
+
+/* ═══════════════ TIMER ═══════════════
+
+   State lives in one place and is timestamp-based, so the clock is right no matter what
+   the browser did to our timers while the card was hidden. `startedAt` and `secs` are all
+   that is needed; everything else is derived. Persisted, so a reload mid-session picks the
+   session back up rather than losing it. */
+let timerRun = null;          // { id, startedAt, secs, done }
+let timerTick = null;
+let wakeLock = null;
+
+try {
+  const raw = localStorage.getItem('bloupunt-timer');
+  if (raw) timerRun = JSON.parse(raw);
+} catch(e){}
+
+const timerSave = () => {
+  try {
+    if (timerRun) localStorage.setItem('bloupunt-timer', JSON.stringify(timerRun));
+    else localStorage.removeItem('bloupunt-timer');
+  } catch(e){}
+};
+const timerLeft = () => timerRun
+  ? Math.max(0, timerRun.secs - (Date.now() - timerRun.startedAt) / 1000) : 0;
+
+/* The grid.
+
+   One dot per second, at the largest size that still fits. The dot only shrinks once the
+   area is full at the current size - so a 20-second timer is a row of fat dots and a
+   20-minute one is a dense field, which is the right feeling for each. Below 4px a dot
+   stops being a dot, so past that point one dot takes on several seconds instead of
+   shrinking further. A 40-minute timer lands there: 2400 seconds across ~1700 cells, two
+   seconds a dot, and it fills just as smoothly. */
+const DOT_MIN = 4, DOT_MAX = 11, GRID_H = 132;
+function timerGrid(secs, w){
+  const W = Math.max(120, w || 300);
+  let size = DOT_MAX, cols = 1, rows = 1, cells = 1, fit = false;
+  for (size = DOT_MAX; size >= DOT_MIN; size--){
+    const cell = size + Math.max(1, Math.round(size / 4));     // gap grows with the dot
+    cols = Math.max(1, Math.floor(W / cell));
+    rows = Math.max(1, Math.floor(GRID_H / cell));
+    cells = cols * rows;
+    if (cells >= secs){ fit = true; break; }
+  }
+  // The loop decrements past DOT_MIN before its condition fails, so without this the dot
+  // ends up one pixel under the floor - which is exactly where a dot stops reading as one.
+  if (!fit) size = DOT_MIN;
+  const per = Math.max(1, Math.ceil(secs / cells));            // seconds represented per dot
+  const n = Math.min(cells, Math.ceil(secs / per));
+  return { size, cols, n, per };
+}
+
+/* Drawn once per start, then never rebuilt - the tick only adds a class. Rebuilding 1500
+   nodes four times a second would be absurd, and it would also restart every dot's
+   animation, which is what makes the field look alive. Each dot gets its own duration and
+   delay so they never breathe in unison. */
+function timerField(h){
+  const secs = timerSecs(h);
+  const g = timerGrid(secs, 300);
+  const cell = g.size + Math.max(1, Math.round(g.size / 4));
+  let out = '';
+  for (let i = 0; i < g.n; i++){
+    const dur = (1.6 + Math.random() * 2.4).toFixed(2);
+    const del = (Math.random() * 3).toFixed(2);
+    const c = BANDS[Math.floor(Math.random() * 3) + 1];        // the quieter three
+    out += '<i class="tdSpot" data-i="'+i+'" style="width:'+g.size+'px;height:'+g.size+'px;'+
+      'background:'+c+';animation-duration:'+dur+'s;animation-delay:-'+del+'s"></i>';
+  }
+  return '<div class="tField" id="tf'+h.id+'" data-per="'+g.per+'" data-n="'+g.n+'" '+
+    'style="gap:'+(cell - g.size)+'px;height:'+GRID_H+'px">'+out+'</div>';
+}
+
+// Solidify everything up to where we are, and put the remaining time on the clock. Called
+// four times a second; touches classes and one text node, nothing else.
+function timerPaint(){
+  if (!timerRun) return;
+  const f = document.getElementById('tf' + timerRun.id);
+  const left = timerLeft();
+  const lab = document.getElementById('tclock' + timerRun.id);
+  if (lab) lab.textContent = fmtClock(left);
+  if (!f) return;
+  const per = +f.dataset.per || 1, n = +f.dataset.n || 1;
+  const doneDots = Math.min(n, Math.floor((timerRun.secs - left) / per));
+  const kids = f.children;
+  for (let i = 0; i < kids.length; i++){
+    const on = i < doneDots;
+    if (on !== kids[i].classList.contains('on')) kids[i].classList.toggle('on', on);
+  }
+}
+
+async function takeWakeLock(){
+  try {
+    if ('wakeLock' in navigator && !wakeLock)
+      wakeLock = await navigator.wakeLock.request('screen');
+  } catch(e){ wakeLock = null; }               // refused or unsupported: the timer still runs
+}
+function dropWakeLock(){
+  try { if (wakeLock) wakeLock.release(); } catch(e){}
+  wakeLock = null;
+}
+
+function timerStop(silent){
+  if (timerTick){ clearInterval(timerTick); timerTick = null; }
+  if (runNode){ runNode(); runNode = null; }
+  dropWakeLock();
+  timerRun = null; timerSave();
+  if (!silent) render();
+}
+
+function timerBegin(h){
+  timerRun = { id: h.id, startedAt: Date.now(), secs: timerSecs(h) };
+  timerSave();
+  runNode = startRunSound(h.runSnd || 'none');
+  takeWakeLock();
+  if (timerTick) clearInterval(timerTick);
+  timerTick = setInterval(() => {
+    if (!timerRun) return;
+    if (timerLeft() <= 0){
+      const card = data.habits.find(x => x.id === timerRun.id);
+      timerStop(true);
+      playEndSound((card && card.endSnd) || 'chime');
+      notice = { ok:true, msg: (card ? card.name : 'Timer') + ' finished' };
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => { notice = null; render(); }, 6000);
+      render();
+      return;
+    }
+    timerPaint();
+  }, 250);
+  expanded = h.id;                             // pressing GO opens the card around it
+}
+
+/* Starting counts. Finishing is not the achievement being tracked - turning up to start is
+   - so the count goes in here and stopping early never takes it back. */
+window.timerGo = id => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  if (timerRun && timerRun.id !== id){
+    confirm = 'timer:' + id;                   // one at a time; ask before cutting the other
+    render(); return;
+  }
+  if (timerRun && timerRun.id === id){ timerStop(); return; }
+  const k = todayKey();
+  h.days[k] = (typeof h.days[k] === 'number' ? h.days[k] : 0) + 1;
+  timerBegin(h);
+  save(); checkMilestones(); render();
+};
+window.timerSwap = id => {
+  timerStop(true);
+  confirm = null;
+  window.timerGo(id);
+};
+window.timerCancel = () => { confirm = null; render(); };
+
+function timerRow(h, today){
+  const open = expanded === h.id;
+  const live = !!(timerRun && timerRun.id === h.id);
+  const starts = typeof h.days[today] === 'number' ? h.days[today] : 0;
+  const s = statsFor(h);
+  const risk = rowRisk(h);
+  const warn = !starts && s.missed === 1, alarm = !starts && s.missed >= 2;
+  const cls = 'row' + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') + risk.cls +
+    (flashIds[h.id]?' undone':'') + (live?' ticking':'');
+
+  const sub = live ? 'Running'
+    : starts ? starts + (starts === 1 ? ' start today' : ' starts today')
+    : s.missed >= 1 ? missNote(h, s)
+    : 'Ready · ' + fmtClock(timerSecs(h));
+
+  // The confirm for cutting off a timer already running on another card.
+  if (confirm === 'timer:' + h.id){
+    const other = timerRun ? data.habits.find(x => x.id === timerRun.id) : null;
+    return '<div class="row"><div class="rmBox">'+
+      '<span class="rmQ">“'+esc(other ? other.name : 'A timer')+'” is still running with '+
+        esc(fmtClock(timerLeft()))+' left. Starting this one stops it.</span>'+
+      '<button class="tNone rmBtn" onclick="timerSwap('+h.id+')">Stop it and start “'+
+        esc(h.name)+'”</button>'+
+      '<button class="btnG rmKeep" onclick="timerCancel()">Leave it running</button>'+
+    '</div></div>';
+  }
+
+  let expBlock = '';
+  if (open){
+    let n30 = 0, tot = 0; const c = midnight();
+    for (let i=0;i<30;i++){ const v = h.days[keyFor(c)];
+      if (typeof v === 'number'){ n30++; tot += v; } c.setDate(c.getDate()-1); }
+    const statBlock =
+      '<div class="stats">'+
+        '<div><div class="sl">Today</div><div class="sv">'+starts+'</div></div>'+
+        '<div><div class="sl">Streak</div><div class="sv">'+s.streak+'</div></div>'+
+        '<div><div class="sl">Last 30</div><div class="sv">'+tot+'</div></div>'+
+      '</div>'+
+      '<div class="next">'+fmtClock(timerSecs(h))+' · '+
+        esc((END_SOUNDS.find(x=>x[0]===(h.endSnd||'chime'))||['','?'])[1])+' at the end · '+
+        esc((RUN_SOUNDS.find(x=>x[0]===(h.runSnd||'none'))||['','?'])[1])+' while it runs</div>';
+    expBlock = '<div class="exp">'+ fullGrid(h) + dayChip(h) + statBlock +
+      dayStatsBlock(h) + chainNote(h) + '</div>';
+  }
+
+  return '<div class="'+cls+'">'+
+    '<div class="top">'+
+      '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
+        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
+        '<div class="streak">'+sub+'</div>'+
+      '</button>'+
+      '<button class="goBtn'+(live?' stop':'')+'" onclick="timerGo('+h.id+')">'+
+        (live ? 'Stop' : 'GO')+'</button>'+
+      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
+        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+    '</div>'+
+    (live
+      ? '<div class="tWrap">'+timerField(h)+
+          '<div class="tClock" id="tclock'+h.id+'">'+fmtClock(timerLeft())+'</div>'+
+        '</div>'
+      : '')+
+    riskBlock(risk) + chainStrip(h) + expBlock +
   '</div>';
 }
 
@@ -3698,6 +4141,7 @@ function habitRow(h){
   if (isJournal(h)) return journalRow(h, today);
   if (isBudget(h)) return budgetRow(h, today);
   if (isHours(h)) return hoursRow(h, today);
+  if (isTimer(h)) return timerRow(h, today);
   if (isCounter(h)) return counterRow(h, today);
   const done  = !!h.days[today];
   const s     = statsFor(h);
@@ -3771,6 +4215,7 @@ function habitRow(h){
 // Values only mean something within a family, so switching families must drop history.
 const famOf = t => t==='score' ? 'score' : t==='time' ? 'time' : t==='mood' ? 'mood'
   : t==='journal' ? 'journal' : t==='budget' ? 'budget' : t==='hours' ? 'hours'
+  : t==='timer' ? 'timer'
   : (t==='plus'||t==='minus'||t==='plusminus') ? 'counter' : 'toggle';
 
 // Which types can have a direction. Toggles and the score have nothing to rank.
@@ -3804,6 +4249,8 @@ const CARD_KINDS = [
   ['hours',     'Hours',       'Time added up as you go. 30m, then 1h, then another 20m.'],
   ['mood',      'Mood',        'A slider from 1 to 10, as often as you like in a day.'],
   ['journal',   'Journal',     'A box to write in. A sentence counts.'],
+  ['timer',     'Timer',       'One button starts it. Meditation, pomodoro, or a limit '+
+                               'on how long you scroll.'],
   ['budget',    'Budget',      'An amount to spend over a period, counting down.'],
   ['score',     'Day score',   'One computed card that tallies all the others.']
 ];
@@ -3837,6 +4284,39 @@ function dowFields(){
       '</div>'+
       '<p class="hint">Untick a day and the card skips it: it will not break a streak and '+
         'will not be counted as missed.</p>'+
+    '</div>';
+}
+
+/* The three settings, and all of them live here rather than on the card. Tapping a sound
+   plays it, because the only way to choose between five synthesised noises is to hear
+   them - a list of words would be guessing. */
+function timerFields(){
+  const secs = timerSecs(form);
+  const pick = (kind, list, cur) => '<div class="sndPick">'+
+    list.map(([v,label]) =>
+      '<button type="button" class="sndBtn'+(cur===v?' on':'')+'" '+
+        'onclick="pickSound(\''+kind+'\',\''+v+'\')">'+label+'</button>').join('')+
+  '</div>';
+  return '<div class="fld">'+
+      '<label class="lbl">How long</label>'+
+      '<div class="hmBox">'+
+        '<input id="fMin" class="spendIn hm" inputmode="numeric" value="'+Math.floor(secs/60)+'" '+
+          'aria-label="Minutes" placeholder="25"><span class="hmU">m</span>'+
+        '<input id="fSec" class="spendIn hm" inputmode="numeric" value="'+(secs%60)+'" '+
+          'aria-label="Seconds" placeholder="0"><span class="hmU">s</span>'+
+      '</div>'+
+      '<p class="hint">Anything from a few seconds to an hour.</p>'+
+    '</div>'+
+    '<div class="fld">'+
+      '<label class="lbl">When it ends</label>'+
+      pick('end', END_SOUNDS, form.endSnd || 'chime')+
+      '<p class="hint">Tap one to hear it.</p>'+
+    '</div>'+
+    '<div class="fld">'+
+      '<label class="lbl">While it runs</label>'+
+      pick('run', RUN_SOUNDS, form.runSnd || 'none')+
+      '<p class="hint">Tap one to hear it. The screen is kept awake for the whole timer '+
+        'either way, so the chime always lands.</p>'+
     '</div>';
 }
 
@@ -3890,7 +4370,10 @@ function periodFields(per, daysHint, label, labels){
 }
 
 function typeHint(t){
-  return t==='hours' ? 'Log time as you go \u2014 30m, then 1h, then another 20m \u2014 and the day '+
+  return t==='timer' ? 'One button starts a countdown. The card records that you started '+
+      'it, never how long it ran \u2014 stopping early costs nothing. Set the length and the '+
+      'sounds here; the card itself stays a single button.'
+    : t==='hours' ? 'Log time as you go \u2014 30m, then 1h, then another 20m \u2014 and the day '+
       'adds up. A target is optional; set one and the card counts toward it.'
     : t==='budget' ? 'An amount to spend over a period, and every spend logged against '+
       'it. The card shows what is left and how long it has to last. Recording nothing '+
@@ -3908,7 +4391,8 @@ function typeHint(t){
     : 'A simple daily tick. Builds streaks, milestones and the warming background.';
 }
 
-const typeLabel = t => t==='hours' ? 'Hours'
+const typeLabel = t => t==='timer' ? 'Timer'
+  : t==='hours' ? 'Hours'
   : t==='budget' ? 'Budget'
   : t==='journal' ? 'Journal'
   : t==='mood' ? 'Mood · 1–10'
@@ -3940,6 +4424,7 @@ function editorHTML(title){
       '</div>' : '')+
     '</div>'+
     ((form.type === 'budget' || form.type === 'hours') ? budgetFields() : '')+
+    (form.type === 'timer' ? timerFields() : '')+
     dowFields();
 
   if (form.type === 'score'){                                // stripped editor - nothing to name/cue
@@ -3973,7 +4458,7 @@ function editorHTML(title){
        budget is a number you spend against: there is no time and place at which it
        happens, and no smallest version that still counts. Three fields that make no
        sense for the card in front of you are worse than none. */
-    ((form.type === 'budget' || form.type === 'hours') ? '' :
+    ((form.type === 'budget' || form.type === 'hours' || form.type === 'timer') ? '' :
     '<div class="fld">'+
       '<label class="lbl" for="fCue">When and where <span class="opt">\u00b7 optional</span></label>'+
       '<input id="fCue" value="'+esc(form.cue)+'" placeholder="At 9pm, in the bedroom">'+
@@ -4229,6 +4714,7 @@ function render(){
   const f = document.getElementById('fName');
   if (f && !f.value) f.focus();
   restoreJournal();
+  timerPaint();
   placePeek();
 }
 

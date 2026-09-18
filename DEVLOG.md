@@ -2309,6 +2309,62 @@ history behind it. → `sw.js v75`.
 
 ---
 
+### 2026-09-18 (later) — The Timer card
+
+One button on the card. Everything else in Manage. It records that you STARTED a timer,
+never how long it ran — stopping early costs nothing, because turning up to start is the
+act being tracked.
+
+#### The field
+
+One dot per second at the largest size that fits, shrinking only once the area is full:
+a 15-second timer is a single row of 11px dots, five minutes is 9px, twenty-five minutes
+is 1500 dots at 4px. Below 4px a dot stops reading as a dot, so past that point one dot
+takes on several seconds rather than shrinking further — a 40-minute timer is 1200 dots
+at two seconds each, and it fills just as smoothly. Every dot breathes on its own
+randomised duration and a negative delay, so nothing pulses in unison; a second that has
+passed stops breathing and holds solid green.
+
+**The field is built once per start and never rebuilt.** The tick only toggles classes.
+Measured: the tick costs **0.115ms** against **3.3ms** for a row render, and rebuilding
+would restart all 1500 animations four times a second — which is the thing that makes the
+field look alive. Fill correctness checked against the clock: 41 seconds elapsed, 41 dots
+solid.
+
+`will-change:opacity` was in the first draft and is deliberately gone. It is a request for
+a compositor layer, and asking a phone for fifteen hundred of them spends more GPU memory
+than it saves; opacity composites without the hint.
+
+#### The sounds
+
+All nine are generated — there are no audio files and there will not be, because a single
+document that opens from `file://` in ten years cannot carry megabytes of rain. White and
+brown noise are exactly what they claim; **rain and sea are that noise shaped by filters
+and a slow swell, so they are suggestive rather than convincing**, and that limit is worth
+stating rather than hiding. Chimes are struck tones — attack, exponential decay — which is
+the one place synthesis genuinely beats a recording.
+
+Verified by rendering each one offline and measuring the samples: all nine produce real
+signal, none clips, and the end sounds peak four to five times above the running bed, so
+the chime cuts through the noise instead of drowning in it. Tapping a sound in the
+settings plays it, because five synthesised noises cannot be chosen from a list of words.
+
+#### The rest
+
+Timestamp-based throughout and persisted, so the clock is right regardless of what the
+browser did to our timers while the card was hidden, and a reload mid-session picks the
+session back up. Screen wake lock for the full duration, no setting — the simple option,
+and the only one that guarantees the chime lands. One timer at a time: pressing GO
+elsewhere asks first, names what is still running and how long it has left, and starting
+the second is what counts it.
+
+**What still needs a real phone.** Wake lock behaviour and whether background audio
+survives a lock on Brave specifically. The card is built for screen-on, so nothing depends
+on the answer — but it is the difference between the audio being a bonus and being load
+bearing. → `sw.js v76`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
