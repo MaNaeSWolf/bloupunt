@@ -2553,6 +2553,68 @@ duration from 5s to 7200s: zero differences, so the small card is untouched.
 > duration. And a "no clock in fullscreen" check asserted the element's existence rather
 > than whether it was *visible*, which the overlay is what settles. → `sw.js v79`.
 
+### 2026-09-19 (later) — Whole rows, and a width that was never measured
+
+Sean, on the fullscreen graphic: when the dot count does not divide evenly by the number of
+columns, the remainder sits as a short centred stub under an otherwise square field. Remove
+it — but the timer still has to cover its whole duration, with nothing dead at the end.
+
+**The grid is now an exact rectangle by construction.** The count used to come from the time
+scale, which almost never divided evenly. It now comes from the grid: pick the dot size,
+work out the columns, round the wanted count to a whole number of rows, and derive the scale
+from *that* — `per = secs / n`, so n dots at secs/n seconds each is exactly secs. Rounding
+the rows shifts how much time a dot stands for by a few percent and never leaves seconds at
+the end with nothing happening. Checked across every duration from 5s to 7200s in both
+sizes — 14,392 grids, all exact rectangles, all covering their full duration.
+
+Three durations (7s, 8s, 13s) land more than 15% off their target scale, because at one or
+two rows the rounding is inherently coarse: 7 seconds wants 28 dots and the only rectangles
+available are 21 or 42. All three look fine — a 7-second timer is one row of 21 fat dots.
+The target scale was always a heuristic; the rectangle and the coverage are the requirements.
+
+**Two bugs found on the way, both from measuring nothing.**
+
+*The column count was inferred, not stated.* With `flex-wrap`, the number of columns is
+whatever the browser decides the width allows, and the code could only guess. Worse, the
+guess was wrong: it used `floor(W / (size+gap))` when k items fit in W if
+`k*size + (k-1)*gap <= W`, i.e. `k <= (W+gap)/(size+gap)` — there are k items but only k-1
+gaps between them. The field is a CSS grid now with an explicit `grid-template-columns`, so
+the browser lays out exactly the columns the arithmetic planned. Inferring a layout you can
+declare is how the two drift apart.
+
+*The small card's width was the literal 300, and had never been true.* The real content
+width at a 375px viewport is 291 — so the grid planned 60 columns where 58 fit, and the
+leftover 50 dots became the very stub row this entry is about. It was on the small card the
+whole time, in front of both of us.
+
+Replacing it with a formula derived from the CSS box model was no better: at 343px the
+arithmetic said 259 and the truth was 236, so the grid ran two columns off the edge and
+`overflow:hidden` ate them silently. **Any such formula is a second copy of the stylesheet
+that has to be kept in step with the first, and it will not be.** The width and height are
+now measured off the rendered field.
+
+Measuring alone did not fix it either, and this is the part worth remembering: the first
+render after any width change is still built on the guess, and nothing came along to
+correct it — the cached measurement only helped a render that never happened. So the field
+records the size it was built with in `data-w`/`data-h`, and if the measurement disagrees,
+one more render is scheduled with the real numbers. The second pass agrees and stops, and a
+guard caps the corrections regardless, because a layout that never settles must not become
+a loop.
+
+**Verified in the browser, not just in arithmetic**, by grouping dots by their laid-out
+`offsetTop`: at 320, 375, 414, 560, 768 and 900px wide, in both sizes, every row holds
+exactly `data-cols` dots, the last row included, and the right-hand column never crosses the
+field's content edge. The first version of that check used `scrollWidth > clientWidth`,
+which false-positives at zero slack; measuring the last dot's right edge against the content
+box is what caught the real 11.5px clip.
+
+> Two stale assertions also had to be corrected rather than the code: an exact equality on
+> coverage, where `n * (secs/n)` legitimately returns 59.99999999999999, and a hard cap of
+> 2400 dots, which rounding up to a whole row can exceed by up to one row. Relaxing a test
+> to make it pass is usually wrong; both of these were the test disagreeing with a change it
+> predated. The distinction is whether you can say what the right bound is *before* you look
+> at the failure. → `sw.js v80`.
+
 ---
 
 ## Still to do / open items

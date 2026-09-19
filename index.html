@@ -293,7 +293,12 @@
   .tWrap.big{position:fixed;inset:0;margin:0;z-index:900;padding:10px;
     display:flex;align-items:center;justify-content:center;background:#0E100C}
   body.zoomed{overflow:hidden}
-  .tField{display:flex;flex-wrap:wrap;align-content:flex-start;overflow:hidden;
+  /* A grid, not flex-wrap. With wrapping, the number of columns is whatever the browser
+     decides the width allows, and the code can only guess at it - guess high and the
+     leftovers wrap into a short final row, which is the stub this replaced. Declaring
+     grid-template-columns makes the count authoritative: the browser lays out exactly the
+     columns the arithmetic planned, so the rectangle is exact by construction. */
+  .tField{display:grid;justify-content:center;align-content:start;overflow:hidden;
     border-radius:12px;background:var(--bg);padding:7px}
   /* Dimmed, because this holds the screen awake for up to half an hour, possibly at night.
      No web API can read or set the phone's brightness, so the only honest lever is emitting
@@ -582,7 +587,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v79';
+const BUILD = 'bloupunt-v80';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -3085,10 +3090,50 @@ function zoomPer(secs){
   for (const q of ZOOM_PERS) if (Math.ceil(secs / q) <= ZOOM_NMAX) return q;
   return ZOOM_PERS[ZOOM_PERS.length - 1];
 }
-// The field's own padding is 7px a side, on top of the overlay's ZOOM_PAD.
-const zoomW = () => Math.max(160, (window.innerWidth  || 380) - ZOOM_PAD*2 - 14);
-const zoomH = () => Math.max(160, (window.innerHeight || 700) - ZOOM_PAD*2 - 14);
 let timerBig = false;
+
+/* How big the field really is.
+
+   The width used to be the literal 300, which was never right: at a 375px viewport the true
+   content width is 291, so the grid planned 60 columns where 58 fit and the leftover 50
+   dots wrapped into a stub row.
+
+   Computing it from the CSS box model instead was no better. At a 343px viewport the
+   arithmetic said 259 and the real width was 236 - two columns' worth - so the grid ran off
+   the edge and `overflow:hidden` quietly ate them. Any formula here is a second copy of the
+   stylesheet that has to be kept in step with the first, and it will not be.
+
+   So the formulas below are a first guess only, and the real numbers are measured off the
+   rendered field. Measuring alone is not enough either: the first render after any width
+   change is still built on the guess, and nothing would come along to correct it. So the
+   field records the size it was built with, and if the measurement disagrees, one more
+   render is scheduled with the real numbers. The second pass agrees and stops - and the
+   guard caps it regardless, because a layout that never settles must not become a loop. */
+let cardW = 0, bigW = 0, bigH = 0, regridT = null, regridGuard = 0;
+const smallW = () => cardW || Math.max(160, Math.min(560, window.innerWidth || 380) - 84);
+const zoomW  = () => bigW  || Math.max(160, (window.innerWidth  || 380) - ZOOM_PAD*2 - 14);
+const zoomH  = () => bigH  || Math.max(160, (window.innerHeight || 700) - ZOOM_PAD*2 - 14);
+function measureField(){
+  const f = document.querySelector('.tField');
+  if (!f) return;
+  const big = f.classList.contains('big'), cs = getComputedStyle(f);
+  const pad = (s, a, b) => parseFloat(s[a]) + parseFloat(s[b]);
+  const w = Math.round(f.clientWidth - pad(cs, 'paddingLeft', 'paddingRight'));
+  if (!(w > 40)) return;
+  // The field's own height is set inline, so the room available comes from its parent.
+  let h = 0;
+  if (big){
+    const wrap = f.parentElement, ws = getComputedStyle(wrap);
+    h = Math.round(wrap.clientHeight - pad(ws, 'paddingTop', 'paddingBottom')
+                                     - pad(cs, 'paddingTop', 'paddingBottom'));
+  }
+  if (big){ bigW = w; if (h > 40) bigH = h; } else cardW = w;
+  const staleW = +f.dataset.w !== w;
+  const staleH = big && h > 40 && +f.dataset.h !== h;
+  if (staleW || staleH){
+    if (regridGuard < 3){ regridGuard++; clearTimeout(regridT); regridT = setTimeout(render, 0); }
+  } else regridGuard = 0;
+}
 
 /* Which dot solidifies next.
 
@@ -3120,31 +3165,47 @@ function fillOrder(run, n, secs){
   orderCache = { key, arr:a };
   return a;
 }
+/* Whole rows only.
+
+   The dot count used to come straight from the time scale, which almost never divided
+   evenly by the column count - so the last row was a short, centred stub hanging off the
+   bottom of an otherwise square field. The grid is now always an exact rectangle: pick the
+   dot size, work out how many columns really fit, then round the wanted count to a whole
+   number of rows.
+
+   The timer still covers its full duration, because the scale is derived from the grid
+   rather than the other way round: `per` is secs/n, so n dots at secs/n seconds each is
+   exactly secs. Rounding the rows shifts how much time one dot stands for by a few percent;
+   it never leaves seconds at the end with nothing happening.
+
+   `cols` is the subtle part. Flexbox fits k items in width W when k*size + (k-1)*gap <= W,
+   i.e. k <= (W + gap) / (size + gap) - there are k items but only k-1 gaps between them.
+   The old floor(W / (size+gap)) undercounts whenever the leftover slack is at least one
+   dot wide, which would have quietly broken the whole-rows guarantee this function now
+   makes: the browser would lay out one more column than the arithmetic believed. */
 function timerGrid(secs, w, boxH, dotMax, wantPer){
   const W = Math.max(120, w || 300), H = Math.max(60, boxH || GRID_H);
   const top = dotMax || DOT_MAX;
-  // Given a scale, fit that many dots. Without one, fit one dot per second and let the
-  // scale fall out of whatever the box can hold.
-  const want = wantPer ? Math.ceil(secs / wantPer) : secs;
-  let size = top, cols = 1, rows = 1, cells = 1, fit = false;
+  // Given a scale, aim for that many dots. Without one, aim for one dot per second.
+  const want = Math.max(1, wantPer ? Math.ceil(secs / wantPer) : secs);
+  const colsAt  = (s, g) => Math.max(1, Math.floor((W + g) / (s + g)));
+  const rowsAt  = (s, g) => Math.max(1, Math.floor((H + g) / (s + g)));
+  let size = top, gap = 1, cols = 1, rowsMax = 1, fit = false;
   for (size = top; size >= DOT_MIN; size--){
-    const cell = size + Math.max(1, Math.round(size / 4));     // gap grows with the dot
-    cols = Math.max(1, Math.floor(W / cell));
-    rows = Math.max(1, Math.floor(H / cell));
-    cells = cols * rows;
-    if (cells >= want){ fit = true; break; }
+    gap = Math.max(1, Math.round(size / 4));                   // gap grows with the dot
+    cols = colsAt(size, gap); rowsMax = rowsAt(size, gap);
+    if (cols * rowsMax >= want){ fit = true; break; }
   }
   // The loop decrements past DOT_MIN before its condition fails, so without this the dot
   // ends up one pixel under the floor - which is exactly where a dot stops reading as one.
-  if (!fit) size = DOT_MIN;
-  /* Honour the asked-for scale only if the dots actually fit. If they do not, fall back to
-     one dot per cell - otherwise the field runs out of dots before the timer runs out of
-     time, which reads as the timer finishing early. */
-  const per = (wantPer && Math.ceil(secs / wantPer) <= cells)
-    ? wantPer
-    : Math.max(1, Math.ceil(secs / cells));
-  const n = Math.min(cells, Math.ceil(secs / per));
-  return { size, cols, n, per };
+  if (!fit){
+    size = DOT_MIN; gap = Math.max(1, Math.round(size / 4));
+    cols = colsAt(size, gap); rowsMax = rowsAt(size, gap);
+  }
+  const rows = Math.max(1, Math.min(rowsMax, Math.round(want / cols)));
+  const n = cols * rows;
+  const per = secs / n;               // exact by construction: n * per === secs
+  return { size, gap, cols, rows, n, per };
 }
 
 /* Drawn once per start, then never rebuilt - the tick only adds a class. Rebuilding 1500
@@ -3154,8 +3215,9 @@ function timerGrid(secs, w, boxH, dotMax, wantPer){
 function timerField(h, big){
   const secs = timerSecs(h);
   const g = big ? timerGrid(secs, zoomW(), zoomH(), ZOOM_DOT_MAX, zoomPer(secs))
-                : timerGrid(secs, 300, GRID_H, DOT_MAX);
-  const cell = g.size + Math.max(1, Math.round(g.size / 4));
+                : timerGrid(secs, smallW(), GRID_H, DOT_MAX);
+  // Exactly the rectangle's own height - no leftover strip under the last row.
+  const boxH = g.rows * g.size + (g.rows - 1) * g.gap;
   let out = '';
   for (let i = 0; i < g.n; i++){
     const dur = (1.6 + Math.random() * 2.4).toFixed(2);
@@ -3165,8 +3227,10 @@ function timerField(h, big){
       'background:'+c+';animation-duration:'+dur+'s;animation-delay:-'+del+'s"></i>';
   }
   return '<div class="tField'+(big?' big':'')+'" id="tf'+h.id+'" '+
-    'data-per="'+g.per+'" data-n="'+g.n+'" '+
-    'style="gap:'+(cell - g.size)+'px;height:'+(big ? zoomH() : GRID_H)+'px">'+out+'</div>';
+    'data-per="'+g.per+'" data-n="'+g.n+'" data-cols="'+g.cols+'" '+
+    'data-w="'+(big ? zoomW() : smallW())+'" data-h="'+(big ? zoomH() : GRID_H)+'" '+
+    'style="grid-template-columns:repeat('+g.cols+','+g.size+'px);'+
+    'gap:'+g.gap+'px;height:'+boxH+'px">'+out+'</div>';
 }
 
 // Solidify everything up to where we are, and put the remaining time on the clock. Called
@@ -3179,7 +3243,11 @@ function timerPaint(){
   if (lab) lab.textContent = fmtClock(left);
   if (!f) return;
   const per = +f.dataset.per || 1, n = +f.dataset.n || 1;
-  const doneDots = Math.min(n, Math.floor((timerRun.secs - left) / per));
+  /* At left = 0 the arithmetic is secs / (secs/n), which is n - but only if the floating
+     point cooperates, and one dot left dark on a finished timer is exactly the kind of
+     thing you would stare at. Snap it. */
+  const doneDots = left <= 0 ? n
+    : Math.min(n, Math.floor((timerRun.secs - left) / per));
   const kids = f.children;
   const order = fillOrder(timerRun, n, timerRun.secs);
   const at = i => kids[order ? order[i] : i];
@@ -3280,9 +3348,9 @@ window.addEventListener('popstate', () => {
    again. Debounced, because a rotation fires a burst of these. */
 let zoomResizeT = null;
 window.addEventListener('resize', () => {
-  if (!timerBig || !timerRun) return;
+  if (!timerRun) return;               // the small card's width moves with the window too
   clearTimeout(zoomResizeT);
-  zoomResizeT = setTimeout(render, 180);
+  zoomResizeT = setTimeout(() => { cardW = bigW = bigH = 0; regridGuard = 0; render(); }, 180);
 });
 window.timerCancel = () => { confirm = null; render(); };
 
@@ -4891,6 +4959,7 @@ function render(){
   if (f && !f.value) f.focus();
   restoreJournal();
   document.body.classList.toggle('zoomed', !!(timerBig && timerRun));
+  measureField();
   timerPaint();
   placePeek();
 }
