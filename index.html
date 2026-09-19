@@ -286,9 +286,24 @@
      which the compositor handles without touching layout; animating size or colour here
      would mean a thousand reflows a second. */
   @keyframes tdBeat{ 0%,100%{opacity:.16} 50%{opacity:.85} }
-  .tWrap{position:relative;margin-top:14px}
+  .tWrap{position:relative;margin-top:14px;cursor:pointer}
+  /* Fullscreen is a fixed overlay, NOT the Fullscreen API. Installed as a PWA there is no
+     browser chrome to hide, so this already fills the screen; it cannot be refused, needs
+     no permission, and still works from a file:// URL in ten years. */
+  .tWrap.big{position:fixed;inset:0;margin:0;z-index:900;padding:10px;
+    display:flex;align-items:center;justify-content:center;background:#0E100C}
+  body.zoomed{overflow:hidden}
   .tField{display:flex;flex-wrap:wrap;align-content:flex-start;overflow:hidden;
     border-radius:12px;background:var(--bg);padding:7px}
+  /* Dimmed, because this holds the screen awake for up to half an hour, possibly at night.
+     No web API can read or set the phone's brightness, so the only honest lever is emitting
+     less light: a near-black ground instead of paper, and the field itself at 72%. The
+     ground does most of the work - dark against white is a far bigger difference than any
+     opacity on the dots. */
+  .tField.big{background:transparent;border-radius:0;opacity:.72;align-content:center;
+    justify-content:center}
+  /* The held dots need to read against black, where sageDeep goes muddy. */
+  .tField.big .tdSpot.on{background:#8FB295!important}
   /* No will-change here on purpose. It is a request for a compositor layer, and asking
      for fifteen hundred of them on a phone spends more GPU memory than the animation
      saves - opacity is composited without the hint anyway. */
@@ -567,7 +582,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v78';
+const BUILD = 'bloupunt-v79';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -3042,6 +3057,39 @@ const timerLeft = () => timerRun
    seconds a dot, and it fills just as smoothly. */
 const DOT_MIN = 4, DOT_MAX = 11, GRID_H = 132;
 
+/* Fullscreen.
+
+   Tap the graphic and it fills the screen; tap again and it comes back. Nothing else is on
+   screen - no clock, no Stop. Stopping is shrink-then-stop, deliberately, because the point
+   of the big view is that there is nothing to look at but the dots.
+
+   How much time one dot stands for:
+
+   The tempting answer was a fixed fine scale - a quarter second a dot - because the screen
+   has the room. Measured, that is the wrong trade. A 25-minute timer at 0.25s/dot is 6000
+   dots at 5px, barely larger than the 4px the small card already uses, and it costs 223ms
+   to build against 68ms today. The extra area is better spent making dots BIGGER than
+   making more of them.
+
+   So: a target count rather than a fixed scale. Take the finest scale from the list whose
+   dot count still lands under the cap. That keeps every timer between roughly 1200 and 2400
+   dots, and every dot between 9px and 14px - two to three times the small card's. A short
+   timer gets the fine scale it needs (30 seconds would be 30 lonely dots at one a second,
+   so it gets 0.25 and 120 of them); a long one settles at a coarser scale instead of
+   dissolving into specks. The cap is also what keeps the build cost near what the small
+   card already pays, so the tap does not stall. */
+const ZOOM_PERS = [0.25, 0.5, 1, 2, 5, 10, 30, 60];
+const ZOOM_NMAX = 2400;                        // dots - the ceiling that sets everything else
+const ZOOM_DOT_MAX = 14, ZOOM_PAD = 10;
+function zoomPer(secs){
+  for (const q of ZOOM_PERS) if (Math.ceil(secs / q) <= ZOOM_NMAX) return q;
+  return ZOOM_PERS[ZOOM_PERS.length - 1];
+}
+// The field's own padding is 7px a side, on top of the overlay's ZOOM_PAD.
+const zoomW = () => Math.max(160, (window.innerWidth  || 380) - ZOOM_PAD*2 - 14);
+const zoomH = () => Math.max(160, (window.innerHeight || 700) - ZOOM_PAD*2 - 14);
+let timerBig = false;
+
 /* Which dot solidifies next.
 
    Short timers fill in reading order, because with twenty dots you can see the row
@@ -3072,20 +3120,29 @@ function fillOrder(run, n, secs){
   orderCache = { key, arr:a };
   return a;
 }
-function timerGrid(secs, w){
-  const W = Math.max(120, w || 300);
-  let size = DOT_MAX, cols = 1, rows = 1, cells = 1, fit = false;
-  for (size = DOT_MAX; size >= DOT_MIN; size--){
+function timerGrid(secs, w, boxH, dotMax, wantPer){
+  const W = Math.max(120, w || 300), H = Math.max(60, boxH || GRID_H);
+  const top = dotMax || DOT_MAX;
+  // Given a scale, fit that many dots. Without one, fit one dot per second and let the
+  // scale fall out of whatever the box can hold.
+  const want = wantPer ? Math.ceil(secs / wantPer) : secs;
+  let size = top, cols = 1, rows = 1, cells = 1, fit = false;
+  for (size = top; size >= DOT_MIN; size--){
     const cell = size + Math.max(1, Math.round(size / 4));     // gap grows with the dot
     cols = Math.max(1, Math.floor(W / cell));
-    rows = Math.max(1, Math.floor(GRID_H / cell));
+    rows = Math.max(1, Math.floor(H / cell));
     cells = cols * rows;
-    if (cells >= secs){ fit = true; break; }
+    if (cells >= want){ fit = true; break; }
   }
   // The loop decrements past DOT_MIN before its condition fails, so without this the dot
   // ends up one pixel under the floor - which is exactly where a dot stops reading as one.
   if (!fit) size = DOT_MIN;
-  const per = Math.max(1, Math.ceil(secs / cells));            // seconds represented per dot
+  /* Honour the asked-for scale only if the dots actually fit. If they do not, fall back to
+     one dot per cell - otherwise the field runs out of dots before the timer runs out of
+     time, which reads as the timer finishing early. */
+  const per = (wantPer && Math.ceil(secs / wantPer) <= cells)
+    ? wantPer
+    : Math.max(1, Math.ceil(secs / cells));
   const n = Math.min(cells, Math.ceil(secs / per));
   return { size, cols, n, per };
 }
@@ -3094,9 +3151,10 @@ function timerGrid(secs, w){
    nodes four times a second would be absurd, and it would also restart every dot's
    animation, which is what makes the field look alive. Each dot gets its own duration and
    delay so they never breathe in unison. */
-function timerField(h){
+function timerField(h, big){
   const secs = timerSecs(h);
-  const g = timerGrid(secs, 300);
+  const g = big ? timerGrid(secs, zoomW(), zoomH(), ZOOM_DOT_MAX, zoomPer(secs))
+                : timerGrid(secs, 300, GRID_H, DOT_MAX);
   const cell = g.size + Math.max(1, Math.round(g.size / 4));
   let out = '';
   for (let i = 0; i < g.n; i++){
@@ -3106,8 +3164,9 @@ function timerField(h){
     out += '<i class="tdSpot" data-i="'+i+'" style="width:'+g.size+'px;height:'+g.size+'px;'+
       'background:'+c+';animation-duration:'+dur+'s;animation-delay:-'+del+'s"></i>';
   }
-  return '<div class="tField" id="tf'+h.id+'" data-per="'+g.per+'" data-n="'+g.n+'" '+
-    'style="gap:'+(cell - g.size)+'px;height:'+GRID_H+'px">'+out+'</div>';
+  return '<div class="tField'+(big?' big':'')+'" id="tf'+h.id+'" '+
+    'data-per="'+g.per+'" data-n="'+g.n+'" '+
+    'style="gap:'+(cell - g.size)+'px;height:'+(big ? zoomH() : GRID_H)+'px">'+out+'</div>';
 }
 
 // Solidify everything up to where we are, and put the remaining time on the clock. Called
@@ -3144,6 +3203,11 @@ function dropWakeLock(){
 }
 
 function timerStop(silent){
+  // Never leave anyone stranded on a black screen with nothing on it.
+  if (timerBig){
+    timerBig = false;
+    if (history.state && history.state.bpZoom){ try { history.back(); } catch(e){} }
+  }
   if (timerTick){ clearInterval(timerTick); timerTick = null; }
   if (runNode){ runNode(); runNode = null; }
   dropWakeLock();
@@ -3196,6 +3260,30 @@ window.timerSwap = id => {
   confirm = null;
   window.timerGo(id);
 };
+/* Tap the graphic to fill the screen, tap again to come back. The history entry is what
+   makes the Android back button shrink the graphic rather than leave the app - a bad thing
+   to discover twenty minutes into a meditation. */
+window.timerZoom = id => {
+  if (!timerRun || timerRun.id !== id) return;
+  if (timerBig){
+    if (history.state && history.state.bpZoom){ history.back(); return; }  // popstate shrinks
+    timerBig = false; render(); return;
+  }
+  timerBig = true;
+  try { history.pushState({ bpZoom: 1 }, ''); } catch(e){}
+  render();
+};
+window.addEventListener('popstate', () => {
+  if (timerBig){ timerBig = false; render(); }
+});
+/* Rotating the phone changes the box the grid was measured against, so it has to be built
+   again. Debounced, because a rotation fires a burst of these. */
+let zoomResizeT = null;
+window.addEventListener('resize', () => {
+  if (!timerBig || !timerRun) return;
+  clearTimeout(zoomResizeT);
+  zoomResizeT = setTimeout(render, 180);
+});
 window.timerCancel = () => { confirm = null; render(); };
 
 function timerRow(h, today){
@@ -3255,7 +3343,8 @@ function timerRow(h, today){
       '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
         'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
     '</div>'+
-    (live ? '<div class="tWrap">'+timerField(h)+'</div>' : '')+
+    (live ? '<div class="tWrap'+(timerBig?' big':'')+'" onclick="timerZoom('+h.id+')">'+
+        timerField(h, timerBig)+'</div>' : '')+
     riskBlock(risk) + chainStrip(h) + expBlock +
   '</div>';
 }
@@ -4801,6 +4890,7 @@ function render(){
   const f = document.getElementById('fName');
   if (f && !f.value) f.focus();
   restoreJournal();
+  document.body.classList.toggle('zoomed', !!(timerBig && timerRun));
   timerPaint();
   placePeek();
 }

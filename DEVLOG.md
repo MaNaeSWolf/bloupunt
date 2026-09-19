@@ -2481,6 +2481,78 @@ from a copy of the intended values, and asserts the partial counts it parsed —
 first run of it silently mis-parsed sea's gain as white's and reported every bed 70x off,
 which looked exactly like a real bug in the app. → `sw.js v78`.
 
+### 2026-09-19 — The timer graphic goes fullscreen
+
+Tap the running graphic and it fills the screen; tap again and it comes back. Nothing else is
+on it — no clock, no Stop. Stopping is shrink-then-stop, which Sean asked for explicitly:
+the point of the big view is that there is nothing to look at but the dots.
+
+**A fixed overlay, not the Fullscreen API.** Bloupunt is installed as a PWA, so it already
+runs in standalone mode with no browser chrome to hide — a `position:fixed; inset:0` div
+*is* fullscreen. That is one CSS class instead of an API that needs a user gesture, can be
+refused, and behaves differently on every platform. Verified: the overlay's rect matches the
+viewport exactly, and sampling `elementFromPoint` on a 60px grid across the whole screen
+returns only the overlay, the field and dots — nothing else is reachable. The clock is
+confirmed occluded rather than merely absent. The overlay sits at `z-index:900`; the next
+highest layer in the app is 70, so nothing can float over it.
+
+**Dot scale: a target count, not a fixed one.** The obvious idea was a fine fixed scale —
+a quarter-second per dot, since the screen has room. Measured, that is the wrong trade:
+
+| dots | build + layout |
+|---|---|
+| 1,560 *(the small card today)* | 68 ms |
+| 3,000 | 143 ms |
+| 6,000 | 223 ms |
+| 9,600 | 439 ms |
+| 13,700 | 502 ms |
+
+A 25-minute timer at 0.25s/dot is 6,000 dots at **5px** — barely bigger than the 4px the
+small card already uses — for 223ms of build against 68ms. The extra area is better spent
+making dots *bigger*, not making more of them.
+
+So `zoomPer()` takes the finest scale from `[0.25, 0.5, 1, 2, 5, 10, 30, 60]` whose dot
+count still lands under `ZOOM_NMAX = 2400`. Every timer from 15 seconds to two hours then
+lands between 60 and 2,400 dots at **9–14px**, two to three times the small card's 4px. A
+30-second timer gets 0.25s/dot and 120 dots rather than 30 lonely ones; an hour gets 2s/dot
+rather than dissolving into specks.
+
+That cap is also why the rebuild cost stopped mattering. `timerField()` is called inline in
+`timerRow()`, so the field is rebuilt on **every** render — and the fullscreen tap is itself
+a render. At the 6,000 dots the fixed-scale plan implied, that is a visible stall on the tap
+that is supposed to feel good. Capping at 2,400 keeps the build near what the small card
+already pays. The blocker was a consequence of the scale choice, and choosing bigger dots
+over more dots dissolved it. Worth remembering before anyone raises `ZOOM_NMAX`.
+
+**Brightness.** Sean asked to drop the screen to a quarter or half. No web API can read or
+set device brightness, so the only honest lever is emitting less light: a near-black ground
+(`#0E100C`) instead of paper, and the field at 72%. The ground does nearly all the work —
+dark against white is a far larger difference than any opacity on the dots. Held dots
+switch to `#8FB295`, because `--sageDeep` goes muddy on black.
+
+**The Android back button** shrinks the graphic instead of leaving the app. Zooming pushes a
+`{bpZoom:1}` history entry and `popstate` shrinks; without it, back would exit the app
+twenty minutes into a meditation. `timerStop()` also unwinds it, so finishing never strands
+anyone on a black screen with nothing on it.
+
+**Rotation** rebuilds the grid against the new box, debounced 180ms. Verified: rotating
+375×812 to 812×375 keeps fullscreen, regrids the dots, preserves the fill and keeps running.
+
+`timerBig` deliberately does not persist — a reload comes back to the small card.
+
+**Verified against the running app**, not just the arithmetic: seeded a 25-minute timer
+already 15 minutes in, and the field lit 60.7% of its dots against 60% elapsed, with 218 of
+them in the first quarter of the grid where a top-left fill would have put 375 — confirming
+the shuffle still scatters. `timerGrid` was also diffed old-against-new across **every**
+duration from 5s to 7200s: zero differences, so the small card is untouched.
+
+> Two test-harness mistakes on the way, same shape as the audio ones. The regression check
+> first used hand-written "before" values and reported a failure that did not exist — I had
+> typed 8px where the old function returned 9px. Comparing against remembered numbers tests
+> the memory, not the code; it now loads the old function out of the backup and diffs every
+> duration. And a "no clock in fullscreen" check asserted the element's existence rather
+> than whether it was *visible*, which the overlay is what settles. → `sw.js v79`.
+
 ---
 
 ## Still to do / open items
