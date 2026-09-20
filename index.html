@@ -497,7 +497,6 @@
     *{transition:none!important}
     .confetti,.breath{display:none}
     .sheet{animation:none}
-    .nslot:hover .node,.cell:hover{transform:none}
     .row.atRisk{animation:none}
   }
 </style>
@@ -620,7 +619,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v83';
+const BUILD = 'bloupunt-v84';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -1154,8 +1153,6 @@ function setJournal(h, k, text){
    handled everywhere `days` is handled: merged, wiped and cleared alongside it. */
 const MOOD_MIN = 1, MOOD_MAX = 10;
 const moodReads = (h, k) => { const a = (h.extra||{})[k]; return Array.isArray(a) ? a : []; };
-const moodLo = (h, k) => Math.min.apply(null, moodReads(h, k));
-const moodHi = (h, k) => Math.max.apply(null, moodReads(h, k));
 // Write the readings and the mean together, so the two can never drift apart.
 function setMoodDay(h, k, reads){
   h.extra = h.extra || {};
@@ -1216,10 +1213,6 @@ function lerpHex(a, b, t){
   const bl=Math.round((A&255)+(((B&255)-(A&255))*t));
   return 'rgb('+r+','+g+','+bl+')';
 }
-const diverge = t => {
-  t = Math.max(0, Math.min(1, t));
-  return t <= 0.5 ? lerpHex(CTR_RED, CTR_MID, t*2) : lerpHex(CTR_MID, CTR_GRN, (t-0.5)*2);
-};
 // The day a habit's history begins: the earlier of its creation and its first
 // logged day, so backfilled/imported history still counts as "it existed then".
 // Day 1 of anything is the first day actually LOGGED - not the day the habit was
@@ -1281,19 +1274,6 @@ const bandColourIdx = i => BANDS[Math.max(0, Math.min(4, i))];
 // Text colour that stays legible on its band (white on the deep green only).
 const bandInkIdx    = i => i >= 4 ? '#FFFFFF' : '#3D3B37';
 
-// Mean of LOGGED days over the trailing 21 days (missed days skipped). Only used for
-// the "7-day avg"-style readouts now - it has no bearing on the score.
-function counterAvg(h){
-  const days = h.days || {};
-  let sum = 0, n = 0;
-  const c = midnight();
-  for (let i=0;i<21;i++){
-    const k = keyFor(c);
-    if (has(days, k)){ sum += days[k]; n++; }
-    c.setDate(c.getDate()-1);
-  }
-  return n ? sum/n : 0;
-}
 
 // Colour is DESCRIPTIVE ONLY - it never touches the score. A day is placed in one of
 // five 20% groups against the habit's own last 21 logged days. Ties share a group.
@@ -1405,7 +1385,6 @@ const TIER_DAYS = (() => {
   return t;
 })();
 const tierOf = chain => { let i = 0; while (i+1 < TIER_DAYS.length && chain >= TIER_DAYS[i+1]) i++; return i; };
-const tierPoints = chain => tierOf(chain) + 1;
 
 // Replay a habit's whole history once, returning { points:{dayKey:n}, chain, tier }.
 // Cached per render pass - render() clears it.
@@ -1655,11 +1634,22 @@ window.spendType = el => { spendDraft[el.dataset.h] = el.value; };
    Deferred a tick for the same reason as everywhere else: a tap on another control fires
    this blur first, and re-rendering here would pull that control out of the DOM before
    its own click could land. */
-window.spendBlur = el => {
+/* Giving the render guard back. Every text input in the app shares this: the journal box,
+   the budget and hours amounts, and the to-do list.
+
+   There were two byte-identical copies of this - `spendBlur` and `todoBlur` - which is
+   exactly the shape of the v70 freeze, where the focus half of the pair was written and the
+   release half was not. Two copies means the next fix lands in one of them. Both names stay,
+   because they are wired into inline markup, but there is only one body now.
+
+   Deferred a tick: a tap on another control fires this blur first, and re-rendering here
+   would pull that control out of the DOM before its own click could land. */
+const releaseTyping = el => {
   if (!el.isConnected) return;              // a render tore it down; not a real blur
   if (jTyping === el.dataset.h) jTyping = null;
   if (jPending){ jPending = false; setTimeout(() => { if (jTyping === null) render(); }, 0); }
 };
+window.spendBlur = releaseTyping;
 window.addSpend = id => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
@@ -2993,8 +2983,7 @@ function journalRow(h, today){
         '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
         '<div class="streak" id="jSub'+h.id+'">'+sub+'</div>'+
       '</button>'+
-      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
-        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+      chevBtn(h, open)+
     '</div>'+
     riskBlock(risk) + chainStrip(h) +
     '<textarea class="jInline'+(open?' open':'')+'" data-h="'+h.id+'" '+
@@ -3098,8 +3087,7 @@ function hoursRow(h, today){
         '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
         '<div class="streak">'+sub+'</div>'+
       '</button>'+
-      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
-        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+      chevBtn(h, open)+
     '</div>'+
     '<div class="bRow">'+
       hoursBox(String(h.id))+
@@ -3490,8 +3478,7 @@ function timerRow(h, today){
       (live ? '<span class="tClock" id="tclock'+h.id+'">'+fmtClock(timerLeft())+'</span>' : '')+
       '<button class="goBtn'+(live?' stop':'')+'" onclick="timerGo('+h.id+')">'+
         (live ? 'Stop' : 'GO')+'</button>'+
-      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
-        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+      chevBtn(h, open)+
     '</div>'+
     (live ? '<div class="tWrap'+(timerBig?' big':'')+'" onclick="timerZoom('+h.id+')">'+
         timerField(h, timerBig)+'</div>' : '')+
@@ -3520,7 +3507,7 @@ function todoItemHTML(h, it, editable){
   const body = editable
     ? '<input class="todoT todoIn" data-h="e'+it.i+'" value="'+esc(it.t)+'" '+
         'aria-label="Item" onfocus="todoFocus(this)" oninput="todoEdit('+h.id+','+it.i+',this)" '+
-        'onblur="todoBlur(this)">'
+        'onblur="todoEditBlur(this)">'
     : '<span class="todoT">'+esc(it.t)+'</span>';
   // Removing an item is an editing act, so it lives where the other editing lives: only
   // once the card is open. The collapsed card stays a list you tick things off.
@@ -3604,8 +3591,7 @@ function todoRow(h, today){
         '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
         '<div class="streak">'+sub+'</div>'+
       '</button>'+
-      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
-        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+      chevBtn(h, open)+
     '</div>'+
     listBlock + riskBlock(risk) + chainStrip(h) + expBlock +
   '</div>';
@@ -3616,11 +3602,14 @@ function todoRow(h, today){
    the keyboard with it. Both halves - take on focus, give back on blur - or the card
    freezes, which is how the budget card broke in v70. */
 window.todoFocus = el => { jTyping = el.dataset.h; };
-window.todoBlur  = el => {
-  if (!el.isConnected) return;                  // a render tore it down; not a real blur
-  if (jTyping === el.dataset.h) jTyping = null;
-  if (jPending){ jPending = false; setTimeout(() => { if (jTyping === null) render(); }, 0); }
-};
+window.todoBlur  = releaseTyping;
+/* Renaming an item persists here rather than on every keystroke. `it.t` is updated live in
+   todoEdit, so the screen and the data never disagree; this is only about when it reaches
+   localStorage. It matters because `save()` stringifies the whole dataset twice, and this
+   was the only one of six typing handlers calling it per character - 0.2ms today, but 7ms
+   at five years of history on a desktop and several times that on a phone. Saving once on
+   the way out also makes a rename a single undo step instead of one per letter. */
+window.todoEditBlur = el => { save(); releaseTyping(el); };
 window.todoType = (id, el) => { todoDraft[id] = el.value; };
 window.todoKey  = (ev, id) => { if (ev.key === 'Enter'){ ev.preventDefault(); addTodo(id); } };
 window.cyclePri = id => { todoPri[id] = PRI_NEXT[todoPri[id] || 2]; render(); };
@@ -3665,8 +3654,7 @@ window.todoEdit = (id, itemId, el) => {
   const it = todoList(h).find(x => x.i === itemId);
   if (!it) return;
   it.t = el.value.slice(0, 200);
-  h.mAt = Date.now();
-  save(false);                                  // per keystroke, so it is not an undo step
+  h.mAt = Date.now();                           // persisted by todoEditBlur, not per keystroke
 };
 
 window.bumpTodo = (id, itemId) => {
@@ -3768,8 +3756,7 @@ function budgetRow(h, today){
         '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
         '<div class="streak">'+sub+'</div>'+
       '</button>'+
-      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
-        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+      chevBtn(h, open)+
     '</div>'+
     '<div class="bRow">'+
       spendBox(String(h.id), ((h.cur||'R').trim()) + ' amount')+
@@ -4053,8 +4040,7 @@ function moodRow(h, today){
         '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
         '<div class="streak">'+sub+'</div>'+
       '</button>'+
-      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
-        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+      chevBtn(h, open)+
     '</div>'+
     '<div class="mRow">'+
       moodSlider(h.id, sv, String(h.id))+
@@ -4138,8 +4124,7 @@ function timeRow(h, today){
         '<div class="streak">'+sub+'</div>'+
       '</button>'+
       acts +
-      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
-        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+      chevBtn(h, open)+
     '</div>'+
     riskBlock(risk) + timeGraph(h)  + expBlock +
   '</div>';
@@ -4418,8 +4403,7 @@ function counterRow(h, today){
         '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+pill+'</div>'+
         '<div class="streak">'+streakLine+'</div>'+
       '</button>'+
-      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
-        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+      chevBtn(h, open)+
     '</div>'+
     riskBlock(risk) + chainStrip(h)  + expBlock +
   '</div>';
@@ -4475,7 +4459,7 @@ function scoreRow(h){
       '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
         '<div class="nameLine"><span class="hname">Score</span></div>'+
       '</button>'+
-      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+      chevBtn(h, open)+
     '</div>'+
     '<div class="sribbon">'+sPk+bubbles+'</div>'+ expBlock +
   '</div>';
@@ -4684,6 +4668,13 @@ function scoreGrid(q){
     '<div class="weeks">'+dowCol()+cols+'</div></div>';
 }
 
+/* The disclosure chevron. Identical in every row function - ten copies of the same four
+   attributes, which is the kind of duplication that produced a `const cls` line existing
+   twice, in journalRow and todoRow, and needing a scoped edit to change one of them. */
+const chevBtn = (h, open) =>
+  '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
+    'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>';
+
 function habitRow(h){
   if (isScore(h)) return scoreRow(h);
   const today = todayKey();
@@ -4757,8 +4748,7 @@ function habitRow(h){
         '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+pill+'</div>'+
         '<div class="streak">'+streakLine+'</div>'+
       '</button>'+
-      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
-        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+      chevBtn(h, open)+
     '</div>'+
     floorBlock + riskBlock(risk) + chainStrip(h)  + expBlock +
   '</div>';

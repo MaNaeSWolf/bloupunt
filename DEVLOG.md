@@ -2799,6 +2799,50 @@ something, the question "was this already like that?" has an answer.
 
 ---
 
+### 2026-09-20 (later) — The cleanup, verified by hash
+
+The five flaws listed in the v83 baseline entry, fixed. Everything here is either a pure
+refactor or a deliberate behaviour change, and the two are told apart by measurement rather
+than by confidence.
+
+**How it was checked.** Before touching anything, all eleven card types were rendered at
+375×812 and a hash taken of `#app` innerHTML in twelve states — every card collapsed, then
+each one expanded in turn. After the edits, the same twelve. Eleven came back byte-identical.
+The twelfth, the to-do card, differed by exactly twelve characters, and undoing only the one
+intended rename (`todoBlur` → `todoEditBlur` on three edit boxes) reproduced the baseline hash
+exactly. So the refactor changed nothing it did not mean to, and that is a measurement rather
+than a belief. The timer's dot field is excluded from the hash because its colours and
+animation offsets are randomised per build by design.
+
+**`todoEdit` no longer saves per keystroke.** It was the only one of six typing handlers that
+did, and `save()` stringifies the whole dataset twice. Measured before the change: 0.2ms
+today, 2.8ms at three years of history, 7.2ms at five, 15ms at ten — on a desktop, so three
+to six times that on a phone. `it.t` is still updated live so the screen and the data never
+disagree; only the write to localStorage moved to blur. Verified: typing eight characters now
+adds **zero** undo entries where it previously added eight, blur writes once and adds one, and
+a single undo restores the whole original name.
+
+**One blur body instead of two identical ones.** `spendBlur` and `todoBlur` had byte-identical
+bodies — the same shape as the v70 freeze, where the focus half of the pair was written and
+the release half was not. Both names survive because they are wired into inline markup, but
+they now point at one `releaseTyping`.
+
+**The chevron is one function.** Ten copies of the same four attributes became `chevBtn(h,
+open)`. This is the duplication that produced a `const cls` line existing identically in both
+`journalRow` and `todoRow`, where changing one meant a scoped edit to avoid changing the
+other. Nine call sites were the two-line form, the tenth in `scoreRow` was a one-liner with
+different indentation — which the patch caught by asserting its anchor count rather than
+replacing blind.
+
+**Dead code removed:** `counterAvg`, `diverge`, `moodHi`, `moodLo`, `tierPoints`, and the
+`.nslot:hover` rule. Nine lines of JS lighter, and five fewer things to wonder about.
+
+Not done: renaming `jTyping` / `jPending`. They are journal-named and now guard four card
+types, but it is 32 references of pure cosmetics and this batch was already being verified by
+hash — worth doing on its own, not folded into a behavioural change. → `sw.js v84`.
+
+---
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
