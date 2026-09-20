@@ -2700,6 +2700,34 @@ undoable save, so the header's undo puts the item back — verified end to end: 
 both. A per-item confirm would have been friction on the one action most likely to be
 repeated several times in a row. → `sw.js v82`.
 
+### 2026-09-20 (later still) — Putting the tick and the delete at opposite ends
+
+Sean, immediately after v82 shipped: the tick belongs on the left, always, and the × on the
+right — a delete button should not sit that close to a success indicator.
+
+He is right, and the v82 reasoning was wrong in an instructive way. That entry argued the
+two were safe next to each other because the delete was *quieter* — no ring, muted grey,
+its own small margin. But visual weight is not the thing that protects you from a thumb
+landing 10px off its target. Distance is. The controls now sit at opposite ends of the row:
+tick hard left, delete hard right, **263px apart** where they were 10px.
+
+The tick leads in both the collapsed and the open card, which is also simply where a
+checkbox belongs in a list read left to right. Verified after the reorder that the leftmost
+control still banks the day (writes `days`, leaves `made`) and the rightmost still deletes
+(moves `made`, leaves `days` untouched) — reordering the markup is exactly the kind of change
+that silently swaps two handlers.
+
+**And a smaller thing the screenshot caught.** The card carried the `done` class whenever the
+day was logged, which strikes the card's name through. On a toggle that is right: the thing
+was done. On a list it is not — ticking one item logs the day, so a card with three items
+still waiting was displaying a struck-through title that said the list was finished. It now
+earns the strike only when something was ticked **and** nothing is left, which is the first
+time the card has had a way to say "list clear" at a glance.
+
+Worth noting the same `const cls = ...` line appears verbatim in `journalRow`, so the edit
+had to be scoped to the last of the two occurrences rather than replaced globally. Two
+identical lines in two card types is a trap for exactly this kind of change. → `sw.js v83`.
+
 ---
 
 ## Still to do / open items

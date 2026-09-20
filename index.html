@@ -356,11 +356,10 @@
   .todoTick{flex:0 0 auto;width:22px;height:22px;border-radius:50%;
     border:1.5px solid var(--faint);background:transparent;cursor:pointer}
   .todoTick:hover{border-color:var(--sage)}
-  /* Deliberately quiet, and set apart from the tick by its own margin. These two sit
-     next to each other and mean opposite things - one banks the day, the other says it
-     never counted - so the tick keeps the ring and the weight, and this is a grey mark
-     at the edge. */
-  .todoDel{flex:0 0 auto;width:20px;height:20px;margin-left:2px;padding:0;background:none;
+  /* Deliberately quiet: the tick keeps the ring and the weight, this is a grey mark at
+     the far edge. The separation from the tick is done by the row order rather than by a
+     margin - see todoItemHTML. */
+  .todoDel{flex:0 0 auto;width:20px;height:20px;padding:0;background:none;
     color:var(--faint);font-size:17px;line-height:1;cursor:pointer}
   .todoDel:hover{color:var(--clay)}
   .todoAdd{display:flex;align-items:center;gap:8px;margin-top:8px}
@@ -621,7 +620,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v82';
+const BUILD = 'bloupunt-v83';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -3529,9 +3528,16 @@ function todoItemHTML(h, it, editable){
     ? '<button class="todoDel" aria-label="Delete this item" '+
         'onclick="dropTodo('+h.id+','+it.i+')">\u00d7</button>'
     : '';
-  return '<div class="todoItem">'+ swatch + body +
+  /* Tick hard left, delete hard right, with the whole row between them.
+
+     They were next to each other at first and that was wrong: the two controls mean
+     opposite things - one banks the day, the other says it never counted - and no amount
+     of making the delete quieter fixes a thumb landing 10px off. Separation does. The tick
+     leads in both the open and the collapsed card, which is also where a checkbox belongs
+     in a list you read left to right. */
+  return '<div class="todoItem">'+
     '<button class="todoTick" aria-label="Tick off" onclick="tickTodo('+h.id+','+it.i+')"></button>'+
-    del +
+    swatch + body + del +
   '</div>';
 }
 
@@ -3543,7 +3549,12 @@ function todoRow(h, today){
   const risk = rowRisk(h);
   const logged = has(h.days, today);
   const warn = !logged && s.missed === 1, alarm = !logged && s.missed >= 2;
-  const cls = 'row' + (logged?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') +
+  /* `done` strikes the card's name through. On a toggle that is exactly right - the thing
+     was done. On a list it is not: ticking one item logs the day, but with three still
+     waiting a struck-through title says the list is finished when it plainly is not. So
+     this card earns the strike only when something was ticked AND nothing is left. */
+  const cls = 'row' + (logged && !list.length ? ' done' : '') +
+    (alarm?' alarm':'') + (!alarm&&warn?' warn':'') +
     risk.cls + (flashIds[h.id]?' undone':'');
 
   const urgent = list.filter(x => (x.p||2) === 1).length;
