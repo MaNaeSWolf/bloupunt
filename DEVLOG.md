@@ -2841,6 +2841,76 @@ Not done: renaming `jTyping` / `jPending`. They are journal-named and now guard 
 types, but it is 32 references of pure cosmetics and this batch was already being verified by
 hash — worth doing on its own, not folded into a behavioural change. → `sw.js v84`.
 
+### 2026-09-20 (later still) — Retention, the archive, and a boot that could not fail safely
+
+Sean: this is a daily tool, not a store of persistent data. Keep what the calendar draws,
+let the rest age out, write it to an archive once a month, and put an export at the bottom
+of Manage that hands back the archive plus everything current.
+
+**One window, 126 days**, taken from the month grid's own eighteen columns rather than
+written as a separate number — so widening the calendar later cannot silently start reading
+days that were pruned. Every card uses it. The to-do card gets no special case: "three
+months" and "what the calendar shows" were the same intent said twice. Open to-do items are
+untouched by any of this and stay until they are ticked or deleted, which is what Sean asked
+for when the question was put to him directly.
+
+**The prize is not disk.** Storage was measured at ~1.7MB after ten years against a 5-10MB
+quota, so it was never going to run out. The prize is that `bloupunt-data` is stringified
+twice on every save, making its size a tax on every tap forever. Pruning holds the live file
+at a constant size no matter how many years accumulate. Measured on a card with 300 days of
+history across three cards: **26KB live becomes 11KB live plus 15KB of cold archive**, and
+the archive is touched only by the sweep and by export.
+
+**The sweep runs on boot, not on a monthly timer.** Same outcome and it cannot be missed —
+a timer has to decide what happens when the app is not opened for two months, and this just
+files whatever has aged out whenever it next runs. On most boots it finds nothing.
+
+**Carrying a streak across the boundary was the part that could have gone badly.** Naive
+pruning would truncate any run longer than the window, so a 200-day streak would silently
+become 126 — the app deleting the one thing it exists to protect. Before deleting anything
+the sweep records the historical best, the first day ever logged, the to-do totals, and
+`edgeRun`: the length of the run still in progress at the boundary. `statsFor` adds it back
+only when the live streak has walked all the way to the boundary unbroken. Verified on a
+card with 300 unbroken days: after the sweep it still reads **streak 300, best 300**, with
+127 days held locally.
+
+**Export was already there, and was wrong.** `exportData()` existed behind "Manage sync" and
+serialised `data` alone — which the moment pruning shipped would have handed back the last
+126 days and called it a backup. It now exports the archive stitched onto the live file,
+including cards deleted since they were archived. Since import merges rather than overwrites,
+the round trip is safe: importing an old export restores the pruned days and the next sweep
+files them away again. Verified: 300 days go in, 300 come back.
+
+It also moved to the bottom of Manage, which is where Sean asked for it and where it belongs
+— it is not a sync setting, and someone who has never set up sync needs a backup *more* than
+someone who has. The anchor is now appended to the document before being clicked, because a
+detached anchor works in desktop Chrome and does nothing in several mobile browsers, which
+is exactly where a backup button most needs to work.
+
+---
+
+**And a real bug, found because the sweep did not run.**
+
+The archive worked when called by hand and did nothing at boot. The console said
+`TypeError: s.trim is not a function` in `wordCount`, thrown from `normaliseJournals` — which
+runs first in the boot sequence, so it took `archiveSweep`, `prevSnap` **and `render()`** down
+with it. The app came up blank while the data on disk was perfectly fine.
+
+Cause: every reader of a journal entry goes through `journalText()`, which guards
+`typeof s === 'string'`. `normaliseJournals` alone passed `h.extra[k]` raw to `wordCount`. Any
+entry that is not a string — from a sync merge with a device on another format, a hand-edited
+import, or a shape not yet invented — was fatal at startup. It reads through the guard now,
+and a malformed record costs you that record instead of the whole app.
+
+The second half of the fix matters more than the first. Each data step in boot is wrapped in
+`bootStep(name, fn)`, so whatever fails, the app still comes up and still draws what it has.
+A blank screen is the worst possible outcome for someone trying to log a card. Verified by
+deliberately seeding a malformed journal entry: the app renders, the sweep runs, and the one
+bad entry is dropped — 299 of 300 journal entries survive.
+
+This is the third time this one function has been the problem — it silently never ran in v54,
+and now this. → `sw.js v85`.
+
 ---
 
 ## Still to do / open items

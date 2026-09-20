@@ -619,7 +619,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v84';
+const BUILD = 'bloupunt-v85';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -982,7 +982,7 @@ const todoList = h => Array.isArray(h.todos) ? h.todos : [];
 // Priority first, then oldest first, so a long-standing item is not stuck behind a new one
 // of equal urgency.
 const todoSorted = h => todoList(h).slice().sort((a,b) => (a.p||2)-(b.p||2) || (a.i||0)-(b.i||0));
-const todoTicked = h => Object.keys(h.days||{})
+const todoTicked = h => ((h.arch && h.arch.ticked) || 0) + Object.keys(h.days||{})
   .reduce((a,k) => a + (typeof h.days[k] === 'number' ? h.days[k] : 0), 0);
 /* Never report fewer created than have demonstrably existed. If `made` were ever lost or
    arrived from an older device without it, "3 created, 9 ticked off" would be nonsense on
@@ -990,6 +990,7 @@ const todoTicked = h => Object.keys(h.days||{})
 const todoMade = h => Math.max(+h.made || 0, todoTicked(h) + todoList(h).length);
 function todoBestDay(h){
   let best = 0, key = null;
+  if (h.arch && h.arch.bestDay){ best = h.arch.bestDay.n; key = h.arch.bestDay.key; }
   for (const k of Object.keys(h.days||{})){
     const v = h.days[k];
     if (typeof v === 'number' && v > best){ best = v; key = k; }
@@ -1134,7 +1135,13 @@ function normaliseJournals(){
   for (const h of (data.habits||[])){
     if (h.type !== 'journal' || !h.extra) continue;
     for (const k of Object.keys(h.extra)){
-      const w = wordCount(h.extra[k]);
+      /* Read through journalText, not the raw value. Every other reader in the app goes
+         through that guard; this one took `extra[k]` straight to wordCount, which does
+         `s.trim()`. A journal entry that is not a string - from a sync merge with a
+         device on a different format, a hand-edited import, or a shape we have not
+         invented yet - threw here, at the very top of boot, and took render() down with
+         it. A malformed record should cost you that record, not the whole app. */
+      const w = wordCount(journalText(h, k));
       if (w) h.days[k] = w; else { delete h.extra[k]; delete h.days[k]; }
     }
   }
@@ -1220,8 +1227,13 @@ function lerpHex(a, b, t){
 // first entry were never misses: you had not started yet.
 function habitStart(h){
   const keys = Object.keys(h.days || {});
-  return keys.length ? parseKey(keys.slice().sort()[0]) : null;
+  const live = keys.length ? keys.slice().sort()[0] : null;
+  // The first day ever logged, not the first day still held locally.
+  const arch = h.arch && h.arch.start;
+  const first = (arch && (!live || arch < live)) ? arch : live;
+  return first ? parseKey(first) : null;
 }
+const daysBetween = (a, b) => Math.round((parseKey(b) - parseKey(a)) / 86400000);
 function firstLogAll(){
   let f = null;
   for (const h of data.habits){
@@ -1502,7 +1514,143 @@ function statsFor(h){
   const c2 = midnight();
   for (let i=0;i<30;i++){ if (kept(keyFor(c2))) last30++; c2.setDate(c2.getDate()-1); }
 
+  /* Read through the archive boundary.
+
+     Without this, pruning would quietly cut both numbers. `best` would forget any run that
+     happened more than the window ago, and a streak longer than the window would be
+     truncated to it - which on a card with a 200-day run would be the app deleting the
+     single thing it exists to protect. `edgeRun` is the length of the run that was still
+     going when the history was archived; it only counts if the live streak has walked all
+     the way back to the boundary without a break. */
+  const a = h.arch;
+  if (a){
+    if (a.edge && a.edgeRun && streak > 0){
+      const first = keys.length ? keys[0] : null;
+      const after = parseKey(a.edge); after.setDate(after.getDate()+1);
+      if (first && first === keyFor(after) && streak >= daysBetween(first, todayKey()) + 1)
+        streak += a.edgeRun;
+    }
+    best = Math.max(best, a.best || 0, streak);
+  }
+
   return { streak, best, last30, missed };
+}
+
+/* ═══════════════ ARCHIVE AND RETENTION ═══════════════
+
+   This is a daily tool, not a data warehouse. Nothing is drawn from further back than the
+   month grid reaches, so nothing older than that needs to sit in the hot data.
+
+   RETAIN_DAYS is the grid's own span, deliberately - one number, taken from the thing that
+   sets it, so widening the calendar later cannot silently start reading days that were
+   pruned. Every card uses the same window; the to-do card gets no special case, because
+   "three months" and "what the calendar shows" were the same intent said twice.
+
+   The real prize is not disk. Storage was measured at ~1.7MB after ten years against a
+   5-10MB quota, so it was never going to run out. The prize is that `bloupunt-data` is
+   stringified twice on every single save, so its size is a tax on every tap forever.
+   Pruning holds the live file at a constant size no matter how many years accumulate, and
+   moves the history to a cold file that is touched only by the sweep and by export.
+
+   Nothing is destroyed. Everything pruned is written to `bloupunt-archive` first, and
+   export stitches the two back together. */
+const RETAIN_DAYS = 126;                       // exactly the month grid's 18 columns
+
+const archiveLoad = () => {
+  try { return JSON.parse(localStorage.getItem('bloupunt-archive')) || { at:0, cards:{} }; }
+  catch(e){ return { at:0, cards:{} }; }
+};
+const archiveSave = a => {
+  try { localStorage.setItem('bloupunt-archive', JSON.stringify(a)); return true; }
+  catch(e){ return false; }                    // quota: better to keep the data than prune it
+};
+
+// Length of the unbroken kept-run ending on `key`, using the same excused rule as statsFor
+// so an archived run and a live one never disagree about what a streak is.
+function runEndingAt(h, key){
+  const days = h.days || {}, paused = data.paused || {};
+  const excused = k => !!paused[k] || dowOff(h, k);
+  let run = 0, g = 0;
+  const c = parseKey(key);
+  while (g++ < 4000){
+    const k = keyFor(c);
+    if (has(days, k)){ run++; c.setDate(c.getDate()-1); continue; }
+    if (excused(k)){ c.setDate(c.getDate()-1); continue; }
+    break;
+  }
+  return run;
+}
+
+/* Move everything past the window into the archive and take it out of the live file.
+
+   Runs on boot rather than on a monthly timer. Same outcome, and it cannot be missed: a
+   timer has to decide what happens when the app is not opened for two months, and this
+   simply finds whatever has aged out whenever it next runs. On most boots it finds nothing
+   and costs one key comparison per card.
+
+   Aggregates are computed BEFORE the delete, because afterwards the live file cannot answer
+   for them: the historical best streak, the first day ever logged, the to-do totals, and
+   the length of any run still in progress at the boundary. Each is stored on the card, so
+   the existing newest-wins sync carries them without new merge rules. */
+function archiveSweep(){
+  const cut = midnight(); cut.setDate(cut.getDate() - RETAIN_DAYS);
+  const cutK = keyFor(cut);
+  const arc = archiveLoad();
+  let moved = 0, cards = 0;
+  for (const h of data.habits){
+    const days = h.days || {};
+    const old = Object.keys(days).filter(k => k < cutK).sort();
+    if (!old.length) continue;
+    const a = h.arch = h.arch || {};
+    const before = statsFor(h);                                   // while the history is intact
+    const edge = old[old.length - 1];
+    a.best  = Math.max(a.best || 0, before.best);
+    a.start = a.start && a.start < old[0] ? a.start : old[0];
+    a.edge  = edge;
+    a.edgeRun = runEndingAt(h, edge);                             // carries a streak across
+    const slot = arc.cards[h.id] = arc.cards[h.id] || { name:h.name, type:h.type, days:{}, extra:{} };
+    slot.name = h.name; slot.type = h.type;                       // keep the labels current
+    for (const k of old){
+      slot.days[k] = days[k];
+      if (typeof days[k] === 'number'){
+        a.ticked = (a.ticked || 0) + days[k];
+        if (!a.bestDay || days[k] > a.bestDay.n) a.bestDay = { n: days[k], key: k };
+      }
+      if (h.extra && h.extra[k] !== undefined){ slot.extra[k] = h.extra[k]; delete h.extra[k]; }
+      delete days[k];
+      moved++;
+    }
+    cards++;
+  }
+  if (!moved) return 0;
+  arc.at = Date.now();
+  // If the archive cannot be written, put nothing in the bin. Losing history to a full
+  // quota would be the one unrecoverable thing this whole feature exists to prevent.
+  if (!archiveSave(arc)) return -1;
+  save(false);
+  return moved;
+}
+
+/* Everything, stitched back together: the archive plus whatever is still live. */
+function exportBundle(){
+  const arc = archiveLoad();
+  const out = { app:'bloupunt', version:BUILD, exportedAt:new Date().toISOString(),
+                retainDays:RETAIN_DAYS, habits:[] };
+  for (const h of data.habits){
+    const slot = (arc.cards || {})[h.id] || { days:{}, extra:{} };
+    out.habits.push({ ...h,
+      days:  { ...(slot.days  || {}), ...(h.days  || {}) },
+      extra: { ...(slot.extra || {}), ...(h.extra || {}) } });
+  }
+  // Cards deleted since they were archived still have their history worth keeping.
+  for (const id of Object.keys(arc.cards || {})){
+    if (data.habits.some(h => String(h.id) === String(id))) continue;
+    const s = arc.cards[id];
+    out.habits.push({ id:+id, name:s.name, type:s.type, days:s.days, extra:s.extra, removed:true });
+  }
+  out.paused = data.paused || {};
+  out.seen   = data.seen || {};
+  return out;
 }
 
 function perfectStreak(){
@@ -2241,13 +2389,31 @@ window.syncTap = async () => {
   render();
 };
 
+/* Export is the archive stitched back onto the live file, never the live file alone.
+
+   This mattered the moment pruning existed: exporting `data` by itself would have handed
+   back only the last 126 days and quietly called it a backup. Since the import side merges
+   rather than overwrites, a round trip is safe - importing an old export restores the
+   pruned days, and the next sweep files them away again.
+
+   The anchor is appended to the document before clicking it. A detached anchor works in
+   desktop Chrome and does nothing at all in several mobile browsers, which is exactly
+   where a backup button most needs to work. */
 window.exportData = () => {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type:'application/json' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'bloupunt-' + todayKey() + '.json';
-  a.click();
-  URL.revokeObjectURL(a.href);
+  try {
+    const blob = new Blob([JSON.stringify(exportBundle(), null, 1)], { type:'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'bloupunt-' + todayKey() + '.json';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    const n = Object.keys((archiveLoad().cards) || {}).length;
+    notice = { ok:true, msg: n ? 'Exported \u2014 including archived history.' : 'Exported.' };
+  } catch(e){ notice = { ok:false, msg:'Could not write the file.' }; }
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => { notice = null; render(); }, 5000);
+  render();
 };
 
 // Read a bloupunt-*.json back in. Merges (never overwrites) so a restore can
@@ -5084,6 +5250,36 @@ function syncPanel(){
   '</div>';
 }
 
+/* Export, at the bottom of Manage.
+
+   It already existed behind "Manage sync", which is the wrong place for it twice over: it
+   is not a sync setting, and someone who has never set up sync needs a backup more than
+   someone who has. */
+function exportBlock(){
+  const arc = archiveLoad();
+  const cards = Object.keys(arc.cards || {});
+  let oldest = null, rows = 0;
+  for (const id of cards){
+    for (const k of Object.keys(arc.cards[id].days || {})){
+      rows++;
+      if (!oldest || k < oldest) oldest = k;
+    }
+  }
+  const line = rows
+    ? rows + ' archived day' + (rows===1?'':'s') + ' back to ' + esc(fmtDay(parseKey(oldest))) +
+      ', plus everything current.'
+    : 'Everything on this device. Nothing has aged out yet.';
+  return '<div class="syncCard" style="margin-top:14px">'+
+    '<div class="syncHead"><div class="syncStat">Your data</div></div>'+
+    '<p class="hint" style="margin:0 0 10px">'+line+'</p>'+
+    '<p class="hint" style="margin:0 0 12px">Cards keep '+RETAIN_DAYS+' days of history \u2014 '+
+      'exactly what the calendar draws. Older days move to an archive on this device and '+
+      'come back in the file below.</p>'+
+    '<button class="btnP" onclick="exportData()">Download everything</button>'+
+    '<button class="btnG" onclick="importData()">Restore from a file</button>'+
+  '</div>';
+}
+
 function celebrationHTML(){
   if (!celebration) return '';
   const { weight, label, sub } = celebration;
@@ -5265,6 +5461,7 @@ function render(){
     (notice
       ? '<div class="banner '+(notice.ok?'ok':'err')+'">'+esc(notice.msg)+'</div>' : '')+
     body +
+    (screen==='manage' ? exportBlock() : '')+
     (swVersion
       ? '<p class="build'+(swVersion !== BUILD ? ' stale' : '')+'">'+esc(swVersion)+
         (swVersion !== BUILD ? ' \u00b7 page ' + esc(BUILD) + ' \u2014 refreshing' : '')+'</p>'
@@ -5303,7 +5500,22 @@ function placePeek(){
 
 /* ═══════════════ BOOT ═══════════════ */
 
-normaliseJournals();               // must run down here: wordCount is a const above
+/* Each data step is isolated, so one bad record cannot cost you the whole app.
+
+   This is not hypothetical: `normaliseJournals` threw on a journal entry of an unexpected
+   shape and, being first, stopped everything after it - no prune, no baseline, and no
+   render at all. A blank screen is the worst possible outcome for a card someone is trying
+   to log, and the data on disk was fine the whole time. Whatever fails here, the app still
+   comes up and still draws what it has. */
+const bootStep = (name, fn) => {
+  try { fn(); } catch(e){ console.error('Bloupunt: boot step "'+name+'" failed', e); }
+};
+bootStep('normaliseJournals', normaliseJournals);   // must run down here: wordCount is above
+/* File anything past the window before the first render, so no view is ever drawn from
+   data that is about to vanish under it. Runs before prevSnap is taken, so the sweep is
+   not itself an undoable step - undoing it would put the live file back and leave the
+   archive holding the same days twice. */
+bootStep('archiveSweep', archiveSweep);
 prevSnap = JSON.stringify(data);   // baseline, so the very first action is undoable
 render();
 booted = true;
