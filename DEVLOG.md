@@ -2728,6 +2728,75 @@ Worth noting the same `const cls = ...` line appears verbatim in `journalRow`, s
 had to be scoped to the last of the two occurrences rather than replaced globally. Two
 identical lines in two card types is a trap for exactly this kind of change. → `sw.js v83`.
 
+### 2026-09-20 — v83 is a known-good baseline. Read this before the cleanup.
+
+Everything below was **measured on v83**, not remembered. It is written down because the next
+few commits delete dead code, de-duplicate row markup and add data pruning — and pruning in
+particular destroys things. If something goes wrong after this point, this entry says what
+"working" looked like and how to get back to it.
+
+**Getting back.** The commit is `333f97d`, tagged `checkpoint-v83`:
+
+```
+git checkout checkpoint-v83 -- index.html sw.js     # just the app, keeping the log
+git checkout checkpoint-v83                          # or the whole tree
+```
+
+Everything the app needs is those two files. Mirrors of both, plus this log, are in
+`../files/`.
+
+---
+
+**What v83 is.** Eleven card types: toggle, counter +, counter −, counter +/−, time of day,
+hours, mood, journal, timer, to-do, day score. Every one of them was opened at 375×812 and
+checked: no console errors, no horizontal overflow, the expanded block renders for all
+eleven. The document's `scrollWidth` stays at 375.
+
+**The windows each view actually reaches back** — worth having written down, because the
+retention rules being added next are defined against them, and they are not all the same:
+
+| view | constant | span |
+|---|---|---|
+| week strip under every card | `N_DAYS` | 21 days |
+| month grid, expanded | 18 columns | 126 days (~4 months) |
+| weekday stats | `WIN_DAYS` | 91 days (13 weeks) |
+
+**Size, as shipped.** 415 KB total: 154 KB of base64 fonts (36%), 238 KB of JS across 4,860
+lines, 31 KB of CSS. The fonts are two variable faces (Fraunces and Inter, each covering
+weight 400–600) at 112 KB combined — already about as tight as they get without subsetting.
+
+**Storage is not the problem, and it is worth knowing that before pruning for the wrong
+reason.** Projected from the real shape of the data: eleven cards logged daily, journals at
+60 words, comes to ~169 KB after a year, ~842 KB after five, ~1.7 MB after ten — against a
+5–10 MB localStorage quota. Pruning is worth doing because the app is a daily tool that does
+not need to be an archive, not because it is running out of room.
+
+**What is sound and should stay sound.** `esc()` covers `& < > "` and every value that
+reaches an `onclick` is a date key or an enum — no user free text goes anywhere near a
+handler argument, so names and item text cannot break markup. 220 of 221 CSS classes are
+referenced. The no-render-typing guard works: a focus event sets `jTyping`, a `render()`
+during it leaves the DOM untouched and sets `jPending`, and blur releases and applies it.
+
+**The known flaws being fixed next**, recorded here so the cleanup can be checked against
+them rather than against memory:
+
+1. `todoEdit` calls `save()` per keystroke — the only one of six typing handlers that does.
+   `save()` stringifies the whole dataset twice. Costs 0.2ms today, 7.2ms at five years of
+   history on a desktop, 3–6× that on a phone.
+2. `spendBlur` and `todoBlur` have byte-identical bodies. This exact pair is what froze the
+   budget card in v70, when the focus half existed and the release half did not.
+3. Five functions defined and never called: `counterAvg`, `diverge`, `moodHi`, `moodLo`,
+   `tierPoints`. One dead CSS rule: `.nslot:hover`.
+4. The card header — `nameBtn` + `nameLine` + `streak` + `chev` — is duplicated verbatim
+   across nine row functions, and the cue/anchor/floor block across four. This is what
+   produced the trap where one `const cls = ...` line existed identically in both
+   `journalRow` and `todoRow`.
+5. `jTyping` / `jPending` / `jFocus` are journal-named but now guard journal, budget, hours
+   and to-do.
+
+None of the five is a bug you can hit today. They are recorded so that if the cleanup breaks
+something, the question "was this already like that?" has an answer.
+
 ---
 
 ## Still to do / open items
