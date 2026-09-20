@@ -2615,6 +2615,61 @@ box is what caught the real 11.5px clip.
 > predated. The distinction is whether you can say what the right bound is *before* you look
 > at the failure. → `sw.js v80`.
 
+### 2026-09-20 — The To-do card
+
+A list that stays until things are ticked off. Collapsed it shows the three most urgent
+items and a line to add another; open, it shows the whole list with every item's name and
+priority editable in place, scrolling past twelve.
+
+**The list is not a per-day thing, but `days[k]` still has to be.** The items live on the
+card and persist across days; `days[k]` holds the count **ticked off** that day, and nothing
+writes a key until something actually is. That one decision is what makes Sean's scoring
+rule fall out with no special case at all: the chain counts days that have a log, so adding
+to the list earns nothing and clearing an item earns the day. It also means the week strip
+and the month grid are the ones that already draw counts — the week view answers "how many
+did I tick off that day" for free, verified as the label `2026-09-20, 2`.
+
+`made` is the one thing that has to be stored, because it cannot be derived: an item that is
+created and ticked leaves the list, so open + ticked does not tell you how many there have
+ever been. `todoMade()` reports `max(made, ticked + open)` so the card can never claim fewer
+created than have demonstrably existed — a card seeded with `made: 9` alongside 8 ticked and
+5 open reports 13, rather than printing a number that contradicts the two beside it.
+
+**Priority** is one button that cycles 2 → 1 → 3 → 2, showing the level it is on. Clay,
+amber, sage — the app has no true red, and clay is what it already uses to mean *attention*,
+so borrowing it keeps the card inside the existing language. The same control appears on the
+add line for the item you are about to create and on each row once the card is open. Sorting
+is priority first, then oldest first, so a long-standing item is not stuck behind a newer one
+of equal urgency.
+
+**The add line has no add button.** Priority is the only control on it, because it is the
+only thing a button says better than the keyboard does; Enter adds the item. Adding also
+deliberately keeps the box focused and the render guard held, repainting the list by hand
+instead — you usually have more than one thing to add, and a render would take the keyboard
+with it.
+
+That guard is the v56/v70 pattern and this card leans on it harder than any other, with up
+to thirteen live inputs. Verified properly rather than by eye: dispatching a real focus event
+sets `jTyping`, a `render()` during it leaves the DOM frozen and sets `jPending`, and blur
+releases it and applies the deferred render. Worth noting that a *programmatic* `.focus()`
+fires no focus event in an unfocused pane, so an earlier version of that check passed while
+testing nothing.
+
+**The calendar chip is read-only but for Clear.** Every other counter offers plus and minus
+there; on this card that would be wrong, because a completion with no item behind it is a
+number the list cannot account for, and `Created` would stop agreeing with `Ticked off`.
+
+**A pre-existing lie, fixed in passing.** Manage prints "No cue set" under any card without
+a cue — but budget, hours and timer have had no cue *field* for several versions, so it was
+warning about something that could not be supplied. Adding a fourth such card made it worth
+fixing rather than joining. Both the editor and Manage now ask one `cueless(type)` function
+instead of each carrying its own list of types, which is what let them drift in the first
+place.
+
+Twelve rows before the list scrolls, and the height is 408px because a row measures 34px —
+22px of control either side of 4px of padding. The first attempt used 432px from a guess at
+the row height and showed a thirteenth. → `sw.js v81`.
+
 ---
 
 ## Still to do / open items

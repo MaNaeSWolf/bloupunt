@@ -334,6 +334,33 @@
   @media (prefers-reduced-motion: reduce){
     .tdSpot{animation:none;opacity:.3}
   }
+  /* The to-do list. */
+  .todoBox{margin-top:12px}
+  /* Twelve rows before it scrolls. Any taller and the card owns the screen; any shorter
+     and a real list is a keyhole. A row measures 34px - 22px of control either side of
+     4px of padding - so twelve of them is 408, and 432 showed a thirteenth. */
+  .todoList.scroll{max-height:408px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .todoItem{display:flex;align-items:center;gap:8px;padding:4px 0}
+  /* The priority marker. A button when the list is open and editable, a plain swatch when
+     it is not - same size either way, so opening the card does not shift the rows. */
+  .todoP{flex:0 0 auto;width:22px;height:22px;border-radius:7px;font-size:11.5px;
+    font-weight:600;color:#fff;display:flex;align-items:center;justify-content:center}
+  button.todoP{cursor:pointer}
+  .todoT{flex:1 1 auto;font-size:14px;color:var(--ink);overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
+  input.todoT{border:none;background:transparent;padding:4px 0;width:100%;
+    font-family:inherit;font-size:14px;color:var(--ink);border-bottom:1px solid transparent}
+  input.todoT:focus{outline:none;border-bottom-color:var(--faint)}
+  /* An empty ring, which fills when you tick it. The item then leaves the list, so the
+     filled state is only ever seen for the instant before the card re-renders. */
+  .todoTick{flex:0 0 auto;width:22px;height:22px;border-radius:50%;
+    border:1.5px solid var(--faint);background:transparent;cursor:pointer}
+  .todoTick:hover{border-color:var(--sage)}
+  .todoAdd{display:flex;align-items:center;gap:8px;margin-top:8px}
+  .todoAdd input{flex:1 1 auto;min-width:0;border:none;border-bottom:1px solid var(--hair);
+    background:transparent;padding:6px 0;font-family:inherit;font-size:14px;color:var(--ink)}
+  .todoAdd input:focus{outline:none;border-bottom-color:var(--faint)}
+  .todoNone{font-size:13px;color:var(--soft);padding:6px 0}
   .dowPick{display:flex;gap:5px}
   .dowBtn{flex:1;min-width:0;background:var(--bg);border:1px solid var(--faint);
     color:var(--soft);padding:9px 0;font-size:12.5px;font-weight:500;border-radius:9px}
@@ -587,7 +614,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v80';
+const BUILD = 'bloupunt-v81';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -930,6 +957,40 @@ const isHours   = h => h.type === 'hours';
    better, so every colour decision is the mirror of the budget's. */
 const isCycle   = h => isBudget(h) || isHours(h);
 const isTimer   = h => h.type === 'timer';
+const isTodo    = h => h.type === 'todo';
+
+/* A to-do list.
+
+   The list itself is not a per-day thing - it sits on the card and persists until each
+   item is ticked off - but `days[k]` still has to be the one number the rest of the engine
+   understands. So it holds the count TICKED OFF that day, and nothing writes a key until
+   something is actually ticked. That is what makes the points fall out correctly without a
+   special case: the chain counts days that have a log, so adding items to the list earns
+   nothing and clearing one earns the day. Which is exactly the ask.
+
+   `made` is a stored counter because it cannot be derived - an item that is created and
+   ticked leaves the list, so open + ticked does not tell you how many there have ever
+   been. Everything else is derived from what is already on disk. */
+const PRI_COL  = { 1:'var(--clay)', 2:'var(--amber)', 3:'var(--sage)' };
+const PRI_NEXT = { 1:3, 2:1, 3:2 };            // default 2, then 1, then 3, then round again
+const todoList = h => Array.isArray(h.todos) ? h.todos : [];
+// Priority first, then oldest first, so a long-standing item is not stuck behind a new one
+// of equal urgency.
+const todoSorted = h => todoList(h).slice().sort((a,b) => (a.p||2)-(b.p||2) || (a.i||0)-(b.i||0));
+const todoTicked = h => Object.keys(h.days||{})
+  .reduce((a,k) => a + (typeof h.days[k] === 'number' ? h.days[k] : 0), 0);
+/* Never report fewer created than have demonstrably existed. If `made` were ever lost or
+   arrived from an older device without it, "3 created, 9 ticked off" would be nonsense on
+   the face of it. */
+const todoMade = h => Math.max(+h.made || 0, todoTicked(h) + todoList(h).length);
+function todoBestDay(h){
+  let best = 0, key = null;
+  for (const k of Object.keys(h.days||{})){
+    const v = h.days[k];
+    if (typeof v === 'number' && v > best){ best = v; key = k; }
+  }
+  return { n: best, key };
+}
 
 /* A timer card records how often you STARTED one, not how long it ran. So `days[k]` is a
    count and nothing else - stopping early takes nothing away, because showing up to start
@@ -2026,7 +2087,11 @@ window.commit = () => {
     const h = data.habits.find(x => x.id === editing);
     if (h){
       // A counter's -1 is not a time of day. Crossing families drops the old values.
-      if (famOf(h.type||'toggle') !== famOf(payload.type)){ h.days = {}; h.extra = {}; }
+      if (famOf(h.type||'toggle') !== famOf(payload.type)){
+        h.days = {}; h.extra = {};
+        // The list and its tally are as type-specific as the days are.
+        delete h.todos; delete h.made;
+      }
       Object.assign(h, payload, { mAt: Date.now() });
     }
   }
@@ -2526,7 +2591,10 @@ function peekBubble(h, k, i, n){
 
 function chainStrip(h){
   const today = todayKey();
-  const counter = isCounter(h) || isJournal(h) || isCycle(h), col = counter ? counterScale(h) : null;
+  // A to-do card's day IS a count - how many were ticked off - so the strip that already
+  // draws counts is the right one, and the week view answers "how many that day" for free.
+  const counter = isCounter(h) || isJournal(h) || isCycle(h) || isTodo(h),
+        col = counter ? counterScale(h) : null;
   const info = windowDays(N_DAYS).map(d => {
     const k = keyFor(d);
     return {
@@ -2628,7 +2696,7 @@ function fullGrid(h){
   const now = new Date(), today = todayKey();
   // Time habits are banded like counters here - the month grid is colour-only, so it
   // needs the good-to-less-good scale, not the toggle's flat green.
-  const graded = isCounter(h) || isTime(h) || isMood(h) || isJournal(h) || isCycle(h),
+  const graded = isCounter(h) || isTime(h) || isMood(h) || isJournal(h) || isCycle(h) || isTodo(h),
         col = graded ? counterScale(h) : null;
 
   // Label the first column of each month. Suppress a label whose month is only a
@@ -2712,6 +2780,14 @@ function dayChip(h){
       '<button class="chipBtn" onclick="addSpendTo('+h.id+',\''+k+'\')">Add</button>'+
       (list.length ? '<button class="chipBtn" onclick="dropSpend('+h.id+',\''+k+'\')">Undo one</button>'+
         '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
+  } else if (isTodo(h)){
+    /* Read-only but for Clear. The other counters offer plus and minus here, and that
+       would be wrong on this card: a completion with no item behind it is a number the
+       list cannot account for, and `Created` would stop agreeing with `Ticked off`. */
+    const v = logged ? h.days[k] : 0;
+    controls =
+      '<span class="chipNum"><span class="chipK">ticked off</span>'+(logged ? v : '\u2014')+'</span>'+
+      (logged ? '<button class="chipBtn clear" onclick="clearDay('+h.id+',\''+k+'\')">Clear</button>' : '');
   } else if (isJournal(h)){
     // The calendar is how you get back to what you wrote - that was the whole ask.
     const w = wordCount(journalText(h, k));
@@ -3416,6 +3492,182 @@ function timerRow(h, today){
     riskBlock(risk) + chainStrip(h) + expBlock +
   '</div>';
 }
+
+/* ═══════════════ TO-DO ═══════════════
+
+   Collapsed: the three most urgent items and a line to add another. Open: the whole list,
+   scrolling past twelve, with every item's name and priority editable in place.
+
+   The add line has no button. Priority is the only control on it, because that is the only
+   thing a button can say better than the keyboard can - Enter adds the item. */
+const TOP_N = 3, OPEN_N = 12;
+let todoPri = {};                               // the pending priority per card, default 2
+let todoDraft = {};                             // the half-typed item, kept across renders
+
+function todoItemHTML(h, it, editable){
+  const pri = it.p || 2;
+  const swatch = editable
+    ? '<button type="button" class="todoP" style="background:'+PRI_COL[pri]+'" '+
+        'aria-label="Priority '+pri+', tap to change" '+
+        'onclick="bumpTodo('+h.id+','+it.i+')">'+pri+'</button>'
+    : '<span class="todoP" style="background:'+PRI_COL[pri]+'">'+pri+'</span>';
+  const body = editable
+    ? '<input class="todoT todoIn" data-h="e'+it.i+'" value="'+esc(it.t)+'" '+
+        'aria-label="Item" onfocus="todoFocus(this)" oninput="todoEdit('+h.id+','+it.i+',this)" '+
+        'onblur="todoBlur(this)">'
+    : '<span class="todoT">'+esc(it.t)+'</span>';
+  return '<div class="todoItem">'+ swatch + body +
+    '<button class="todoTick" aria-label="Tick off" onclick="tickTodo('+h.id+','+it.i+')"></button>'+
+  '</div>';
+}
+
+function todoRow(h, today){
+  const open = expanded === h.id;
+  const list = todoSorted(h);
+  const doneToday = typeof h.days[today] === 'number' ? h.days[today] : 0;
+  const s = statsFor(h);
+  const risk = rowRisk(h);
+  const logged = has(h.days, today);
+  const warn = !logged && s.missed === 1, alarm = !logged && s.missed >= 2;
+  const cls = 'row' + (logged?' done':'') + (alarm?' alarm':'') + (!alarm&&warn?' warn':'') +
+    risk.cls + (flashIds[h.id]?' undone':'');
+
+  const urgent = list.filter(x => (x.p||2) === 1).length;
+  const sub = (alarm || warn) ? missNote(h, s)
+    : doneToday ? doneToday + ' ticked off today' +
+        (list.length ? ' \u00b7 ' + list.length + ' left' : ' \u00b7 list clear')
+    : list.length ? list.length + ' on the list' + (urgent ? ' \u00b7 ' + urgent + ' urgent' : '')
+    : 'Nothing on the list';
+
+  const shown = open ? list.slice(0, Math.max(OPEN_N, list.length)) : list.slice(0, TOP_N);
+  const items = shown.map(it => todoItemHTML(h, it, open)).join('');
+  const pend = todoPri[h.id] || 2;
+  const listBlock =
+    '<div class="todoBox">'+
+      (list.length
+        ? '<div class="todoList'+(open && list.length > OPEN_N ? ' scroll' : '')+'">'+items+'</div>'
+        : '<div class="todoNone">Type below to add the first one.</div>')+
+      '<div class="todoAdd">'+
+        '<input class="todoIn" data-h="t'+h.id+'" value="'+esc(todoDraft[h.id] || '')+'" '+
+          'placeholder="Add something" aria-label="Add an item" '+
+          'onfocus="todoFocus(this)" oninput="todoType('+h.id+',this)" '+
+          'onkeydown="todoKey(event,'+h.id+')" onblur="todoBlur(this)">'+
+        '<button type="button" class="todoP" style="background:'+PRI_COL[pend]+'" '+
+          'aria-label="Priority '+pend+' for the next item, tap to change" '+
+          'onclick="cyclePri('+h.id+')">'+pend+'</button>'+
+      '</div>'+
+    '</div>';
+
+  let expBlock = '';
+  if (open){
+    const made = todoMade(h), ticked = todoTicked(h), best = todoBestDay(h);
+    const statBlock =
+      '<div class="stats">'+
+        '<div><div class="sl">Created</div><div class="sv">'+made+'</div></div>'+
+        '<div><div class="sl">Ticked off</div><div class="sv">'+ticked+'</div></div>'+
+        '<div><div class="sl">Best day</div><div class="sv">'+(best.n || 0)+'</div></div>'+
+      '</div>'+
+      (best.key ? '<div class="next">Best day was '+esc(fmtDay(parseKey(best.key)))+
+        ' \u00b7 '+best.n+' ticked off</div>' : '');
+    expBlock = '<div class="exp">'+ fullGrid(h) + dayChip(h) + statBlock +
+      dayStatsBlock(h) + chainNote(h) + '</div>';
+  }
+
+  return '<div class="'+cls+'">'+
+    '<div class="top">'+
+      '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
+        '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
+        '<div class="streak">'+sub+'</div>'+
+      '</button>'+
+      '<button class="chev'+(open?' open':'')+'" aria-expanded="'+open+'" '+
+        'aria-label="Show details" onclick="toggleExpand('+h.id+')">'+CHEV_SVG+'</button>'+
+    '</div>'+
+    listBlock + riskBlock(risk) + chainStrip(h) + expBlock +
+  '</div>';
+}
+
+/* Typing in any of these boxes takes the no-render guard, exactly as the journal does:
+   render() replaces innerHTML, and on Android a focused input leaving the document takes
+   the keyboard with it. Both halves - take on focus, give back on blur - or the card
+   freezes, which is how the budget card broke in v70. */
+window.todoFocus = el => { jTyping = el.dataset.h; };
+window.todoBlur  = el => {
+  if (!el.isConnected) return;                  // a render tore it down; not a real blur
+  if (jTyping === el.dataset.h) jTyping = null;
+  if (jPending){ jPending = false; setTimeout(() => { if (jTyping === null) render(); }, 0); }
+};
+window.todoType = (id, el) => { todoDraft[id] = el.value; };
+window.todoKey  = (ev, id) => { if (ev.key === 'Enter'){ ev.preventDefault(); addTodo(id); } };
+window.cyclePri = id => { todoPri[id] = PRI_NEXT[todoPri[id] || 2]; render(); };
+
+window.addTodo = id => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const el = document.querySelector('.todoIn[data-h="t'+id+'"]');
+  const text = String((el ? el.value : todoDraft[id]) || '').trim();
+  if (!text) return;
+  h.todos = todoList(h).concat([{ i: Date.now(), t: text.slice(0, 200), p: todoPri[id] || 2 }]);
+  h.made = (+h.made || 0) + 1;
+  h.mAt = Date.now();
+  todoDraft[id] = '';
+  /* Adding is not the achievement, so this writes nothing to `days` and earns no point.
+     It also deliberately leaves the box focused and the guard held - you usually have more
+     than one thing to add - so the list is repainted by hand rather than by render(). */
+  if (el){ el.value = ''; el.focus(); }
+  save();
+  if (jTyping === null) render(); else repaintTodo(h);
+};
+
+// Update the list in place while an input holds the render guard.
+function repaintTodo(h){
+  const row = document.querySelector('.todoIn[data-h="t'+h.id+'"]');
+  const box = row && row.closest('.todoBox');
+  const list = box && box.querySelector('.todoList');
+  const open = expanded === h.id;
+  const items = todoSorted(h);
+  const shown = open ? items.slice(0, Math.max(OPEN_N, items.length)) : items.slice(0, TOP_N);
+  const html = shown.map(it => todoItemHTML(h, it, open)).join('');
+  if (list) list.innerHTML = html;
+  else if (box) box.insertAdjacentHTML('afterbegin',
+    '<div class="todoList'+(open && items.length > OPEN_N ? ' scroll' : '')+'">'+html+'</div>');
+  const none = box && box.querySelector('.todoNone');
+  if (none && items.length) none.remove();
+}
+
+window.todoEdit = (id, itemId, el) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const it = todoList(h).find(x => x.i === itemId);
+  if (!it) return;
+  it.t = el.value.slice(0, 200);
+  h.mAt = Date.now();
+  save(false);                                  // per keystroke, so it is not an undo step
+};
+
+window.bumpTodo = (id, itemId) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const it = todoList(h).find(x => x.i === itemId);
+  if (!it) return;
+  it.p = PRI_NEXT[it.p || 2];
+  h.mAt = Date.now();
+  save();
+  if (jTyping === null) render(); else repaintTodo(h);
+};
+
+/* Ticking one off is the whole point: it is what writes to `days`, and therefore what
+   earns the day, the streak and the score. */
+window.tickTodo = (id, itemId) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const before = todoList(h).length;
+  h.todos = todoList(h).filter(x => x.i !== itemId);
+  if (h.todos.length === before) return;        // already gone; do not bank it twice
+  const k = todayKey();
+  h.days[k] = (typeof h.days[k] === 'number' ? h.days[k] : 0) + 1;
+  h.mAt = Date.now();
+  save(); checkMilestones(); render();
+};
 
 function budgetRow(h, today){
   const open = expanded === h.id;
@@ -4386,6 +4638,7 @@ function habitRow(h){
   if (isBudget(h)) return budgetRow(h, today);
   if (isHours(h)) return hoursRow(h, today);
   if (isTimer(h)) return timerRow(h, today);
+  if (isTodo(h)) return todoRow(h, today);
   if (isCounter(h)) return counterRow(h, today);
   const done  = !!h.days[today];
   const s     = statsFor(h);
@@ -4459,8 +4712,18 @@ function habitRow(h){
 // Values only mean something within a family, so switching families must drop history.
 const famOf = t => t==='score' ? 'score' : t==='time' ? 'time' : t==='mood' ? 'mood'
   : t==='journal' ? 'journal' : t==='budget' ? 'budget' : t==='hours' ? 'hours'
-  : t==='timer' ? 'timer'
+  : t==='timer' ? 'timer' : t==='todo' ? 'todo'
   : (t==='plus'||t==='minus'||t==='plusminus') ? 'counter' : 'toggle';
+
+/* Cards with no cue, anchor or floor.
+
+   Those three fields are the Atomic Habits scaffolding for something you DO at a time and
+   place. A budget is a number you spend against, a timer is a button, a list is a list -
+   none of them has a doorway you walk through. The editor has hidden the fields for a
+   while; Manage was still printing "No cue set" underneath them, which is a warning about
+   a field the card does not have and cannot be given. Both now ask the same function, so
+   they cannot drift apart again. */
+const cueless = t => t === 'budget' || t === 'hours' || t === 'timer' || t === 'todo';
 
 // Which types can have a direction. Toggles and the score have nothing to rank.
 const dirTypes = t => t==='time' || t==='plus' || t==='minus' || t==='plusminus';
@@ -4495,6 +4758,8 @@ const CARD_KINDS = [
   ['journal',   'Journal',     'A box to write in. A sentence counts.'],
   ['timer',     'Timer',       'One button starts it. Meditation, pomodoro, or a limit '+
                                'on how long you scroll.'],
+  ['todo',      'To-do list',  'A list with three priority levels. A point for ticking '+
+                               'one off, never for adding one.'],
   ['budget',    'Budget',      'An amount to spend over a period, counting down.'],
   ['score',     'Day score',   'One computed card that tallies all the others.']
 ];
@@ -4614,7 +4879,10 @@ function periodFields(per, daysHint, label, labels){
 }
 
 function typeHint(t){
-  return t==='timer' ? 'One button starts a countdown. The card records that you started '+
+  return t==='todo' ? 'A list that stays until you tick things off. Three priority '+
+      'levels; the card shows the top three and the whole list opens below. The day '+
+      'counts when you tick something off \u2014 adding to the list is not the achievement.'
+    : t==='timer' ? 'One button starts a countdown. The card records that you started '+
       'it, never how long it ran \u2014 stopping early costs nothing. Set the length and the '+
       'sounds here; the card itself stays a single button.'
     : t==='hours' ? 'Log time as you go \u2014 30m, then 1h, then another 20m \u2014 and the day '+
@@ -4635,7 +4903,8 @@ function typeHint(t){
     : 'A simple daily tick. Builds streaks, milestones and the warming background.';
 }
 
-const typeLabel = t => t==='timer' ? 'Timer'
+const typeLabel = t => t==='todo' ? 'To-do list'
+  : t==='timer' ? 'Timer'
   : t==='hours' ? 'Hours'
   : t==='budget' ? 'Budget'
   : t==='journal' ? 'Journal'
@@ -4702,7 +4971,7 @@ function editorHTML(title){
        budget is a number you spend against: there is no time and place at which it
        happens, and no smallest version that still counts. Three fields that make no
        sense for the card in front of you are worse than none. */
-    ((form.type === 'budget' || form.type === 'hours' || form.type === 'timer') ? '' :
+    (cueless(form.type) ? '' :
     '<div class="fld">'+
       '<label class="lbl" for="fCue">When and where <span class="opt">\u00b7 optional</span></label>'+
       '<input id="fCue" value="'+esc(form.cue)+'" placeholder="At 9pm, in the bedroom">'+
@@ -4840,7 +5109,8 @@ function render(){
   // deleted, screen changed) would otherwise block every future render forever, and
   // the release check at the bottom of this function could never be reached to undo it.
   if (jTyping !== null &&
-      !document.querySelector('.jInline[data-h="'+jTyping+'"], .spendIn[data-h="'+jTyping+'"]'))
+      !document.querySelector('.jInline[data-h="'+jTyping+'"], .spendIn[data-h="'+jTyping+'"], '+
+                              '.todoIn[data-h="'+jTyping+'"]'))
     jTyping = null;
   if (jTyping !== null){ jPending = true; return; }
   _chainCache = {};                 // chain/point replay is per-render
@@ -4906,9 +5176,11 @@ function render(){
           (h.cue     ? '<div class="mMeta">'+esc(h.cue)+'</div>' : '')+
           (h.minimum ? '<div class="mMeta">Floor: '+esc(h.minimum)+'</div>' : '')+
           (isCounter(h)||isTime(h) ? '<div class="mMeta">'+typeLabel(h.type)+(isDown(h)?' · lower is better':'')+'</div>' : '')+
+          (isTodo(h) ? '<div class="mMeta">'+typeLabel(h.type)+'</div>' : '')+
           (isScore(h) ? '<div class="mMeta">Day score · computed from your habits</div>' : '')+
           (h.hidden ? '<div class="mMeta">Hidden · history and points kept</div>' : '')+
-          (!h.cue && !isCounter(h) && !isScore(h) && !isTime(h) ? '<div class="mWarn">No cue set</div>' : '')+
+          (!h.cue && !isCounter(h) && !isScore(h) && !isTime(h) && !cueless(h.type)
+            ? '<div class="mWarn">No cue set</div>' : '')+
         '</div>'+
         (h.hidden
           ? '<button class="link" onclick="showHabit('+h.id+')">Restore</button>'
