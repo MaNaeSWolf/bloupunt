@@ -356,6 +356,13 @@
   .todoTick{flex:0 0 auto;width:22px;height:22px;border-radius:50%;
     border:1.5px solid var(--faint);background:transparent;cursor:pointer}
   .todoTick:hover{border-color:var(--sage)}
+  /* Deliberately quiet, and set apart from the tick by its own margin. These two sit
+     next to each other and mean opposite things - one banks the day, the other says it
+     never counted - so the tick keeps the ring and the weight, and this is a grey mark
+     at the edge. */
+  .todoDel{flex:0 0 auto;width:20px;height:20px;margin-left:2px;padding:0;background:none;
+    color:var(--faint);font-size:17px;line-height:1;cursor:pointer}
+  .todoDel:hover{color:var(--clay)}
   .todoAdd{display:flex;align-items:center;gap:8px;margin-top:8px}
   .todoAdd input{flex:1 1 auto;min-width:0;border:none;border-bottom:1px solid var(--hair);
     background:transparent;padding:6px 0;font-family:inherit;font-size:14px;color:var(--ink)}
@@ -614,7 +621,7 @@ let daySel    = null;       // { id, key } — a day picked in a week view, read
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v81';
+const BUILD = 'bloupunt-v82';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -3516,8 +3523,15 @@ function todoItemHTML(h, it, editable){
         'aria-label="Item" onfocus="todoFocus(this)" oninput="todoEdit('+h.id+','+it.i+',this)" '+
         'onblur="todoBlur(this)">'
     : '<span class="todoT">'+esc(it.t)+'</span>';
+  // Removing an item is an editing act, so it lives where the other editing lives: only
+  // once the card is open. The collapsed card stays a list you tick things off.
+  const del = editable
+    ? '<button class="todoDel" aria-label="Delete this item" '+
+        'onclick="dropTodo('+h.id+','+it.i+')">\u00d7</button>'
+    : '';
   return '<div class="todoItem">'+ swatch + body +
     '<button class="todoTick" aria-label="Tick off" onclick="tickTodo('+h.id+','+it.i+')"></button>'+
+    del +
   '</div>';
 }
 
@@ -3650,6 +3664,36 @@ window.bumpTodo = (id, itemId) => {
   const it = todoList(h).find(x => x.i === itemId);
   if (!it) return;
   it.p = PRI_NEXT[it.p || 2];
+  h.mAt = Date.now();
+  save();
+  if (jTyping === null) render(); else repaintTodo(h);
+};
+
+/* Removing an item that should never have been on the list.
+
+   Unlike ticking, this writes nothing to `days` - no point, no day logged - which is the
+   whole distinction between the two buttons sitting next to each other.
+
+   It also puts `made` back. That is a real choice and it could go either way: a deleted
+   item WAS created, so leaving the count alone is defensible. But the reason to delete is
+   almost always that the item was a mistake or a duplicate, and a Created figure that only
+   ever inflates stops meaning anything - it would drift upward with every typo until the
+   pair "created 40, ticked off 8" said nothing about the work. Read as "of what you meant
+   to do, how much got done", the pair stays useful.
+
+   Nothing already banked can be lost this way: `todoMade()` floors the figure at
+   ticked + open, so the count cannot fall below what has demonstrably existed however many
+   times this is pressed.
+
+   No confirmation, because the app already has the better answer - this is an ordinary
+   undoable save, so the header's undo puts the item back. */
+window.dropTodo = (id, itemId) => {
+  const h = data.habits.find(x => x.id === id);
+  if (!h) return;
+  const before = todoList(h).length;
+  h.todos = todoList(h).filter(x => x.i !== itemId);
+  if (h.todos.length === before) return;
+  h.made = Math.max(0, (+h.made || 0) - 1);
   h.mAt = Date.now();
   save();
   if (jTyping === null) render(); else repaintTodo(h);

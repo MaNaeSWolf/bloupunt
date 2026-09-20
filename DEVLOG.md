@@ -2670,6 +2670,36 @@ Twelve rows before the list scrolls, and the height is 408px because a row measu
 22px of control either side of 4px of padding. The first attempt used 432px from a guess at
 the row height and showed a thirteenth. → `sw.js v81`.
 
+### 2026-09-20 (later) — Deleting a to-do
+
+Sean: there has to be a way to remove an entry, in the expanded view. Without one a typo was
+permanent unless you ticked it off, which would wrongly bank a point for it.
+
+A quiet grey **×** at the end of each row, and only once the card is open — removing an item
+is an editing act, so it lives where the other editing already lives, and the collapsed card
+stays a list you tick things off. It sits apart from the tick with its own margin, because
+the two are adjacent and mean opposite things: one banks the day, the other says it never
+counted. The tick keeps the ring and the weight.
+
+**It writes nothing to `days`.** No point, no day logged — that is the entire distinction
+between the two buttons, and it is the reason a delete cannot be used to earn the day.
+
+**It also puts `made` back, and that is a real choice.** A deleted item *was* created, so
+leaving the count alone is defensible. But the reason to delete is almost always that the
+item was a mistake or a duplicate, and a Created figure that only ever inflates stops meaning
+anything — it would drift upward with every typo until "created 40, ticked off 8" said
+nothing about the work. Read as *of what you meant to do, how much got done*, the pair stays
+useful. Flagged to Sean rather than buried, since it could reasonably go the other way.
+
+Nothing already banked can be lost this way. `todoMade()` floors the figure at ticked + open,
+verified by forcing `made` to 0 on a card with 5 ticked and 3 open: it reports 8, not 0.
+
+**No confirmation, because the app already has the better answer.** This is an ordinary
+undoable save, so the header's undo puts the item back — verified end to end: delete takes
+`made` 9 → 8 and the item out of the list while `days` stays untouched, and undo restores
+both. A per-item confirm would have been friction on the one action most likely to be
+repeated several times in a row. → `sw.js v82`.
+
 ---
 
 ## Still to do / open items
