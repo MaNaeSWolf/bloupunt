@@ -2913,6 +2913,158 @@ and now this. → `sw.js v85`.
 
 ---
 
+### 2026-09-29 — The priority button no longer ends the typing
+
+Type an item, tap the priority number, and the keyboard dropped; the box had to be
+tapped again before Enter could add the item. Typing and then setting priority is the
+normal order, so this happened on nearly every entry.
+
+Two separate causes, and either alone would have done it:
+- **The tap took focus.** The button's `mousedown` moved focus off the input, and on
+  Android a blurred input takes the keyboard with it. This happens before the click
+  handler runs, so nothing in `cyclePri` could have prevented it.
+- **`cyclePri` called `render()`.** Even with focus kept, a full re-render replaces the
+  input. With the typing guard held, `render()` would have deferred instead, leaving
+  the button showing the old number.
+
+The button now refuses focus (`onmousedown="event.preventDefault()"`; the click still
+fires, and keyboard activation is unaffected), and while the guard is held `cyclePri`
+swaps just the button via `outerHTML`. The markup lives in one builder, `todoPendBtn`,
+used by both `todoRow` and the in-place repaint.
+
+Verified at phone size with real clicks and keys and a blur listener on the box: type,
+tap priority twice (2 → 1 → 3), Enter, type a second item, Enter. No blur fired, both
+items saved at priority 3, and the box was left focused and empty. Not verified on a
+physical Android keyboard; what emulation proves is that focus never leaves the input,
+which is what the keyboard follows.
+
+Noticed and **not** fixed here: after adding with Enter, the card's subtitle still reads
+"Nothing on the list" (or the old count), even after leaving the box. `addTodo` repaints
+the list by hand while the guard is held but never sets `jPending`, so the release on
+blur has no reason to render. This predates v86.
+
+→ `sw.js v86`, `BUILD v86`.
+
+### 2026-09-29 (later) — A full read-through, and ten fixes from it
+
+The whole app was read end to end looking for bugs rather than features. Two findings were
+confirmed by running them before anything was changed; everything below was then tested
+live, each fix against the case that exposed it.
+
+#### The ladder and the streak across the archive boundary (would have hit ~15 Nov)
+
+`chainRun` replayed from the first day ever logged. After `archiveSweep`, every archived day
+was simply absent - so it read as a miss. Measured before the fix: a card logged every day for
+260 days came back from its first sweep at run 127, 5 points instead of 6, with "113 clean days
+for 6" that it could never reach, because the replay can never see further back than the window.
+
+Worse, found while fixing it: the sweep runs on every boot, so after the first big sweep it
+runs daily and moves ONE day each time. `runEndingAt` measured the run ending at that single
+day as 1, and `statsFor`'s carry check required the first live day to sit right after the edge
+AND the streak to cover every calendar day since - which also failed on any card with a skip
+day or a pause. The 260-day streak would have read about 128 on the second morning.
+
+- `chainReplay(h, seed, from, to)` is the ladder, split out of `chainRun`. The sweep runs it up
+  to the edge and stores `arch.chain = { lvl, run, graceAt, runDrops }`; `chainRun` resumes from
+  there. `graceAt` is now a day key, not a loop index, so the state means the same thing
+  wherever the replay resumes.
+- `statsFor` and `runEndingAt` both stop when they walk onto `arch.edge` and add `arch.edgeRun`.
+  Tested before `kept`, so a day a sync hands back across the boundary is never counted twice.
+- The edge only moves forward, and `unionInto` keeps the later `arch` whichever side edited the
+  card last - a sweep stamps no `mAt`, so the old meta rule could have dropped it.
+
+**Verified by simulation:** the clock faked forward day by day for 45 days over 300 days of
+history, sweeping daily (795 days archived), four cards - every day, scattered graced misses
+plus a double miss, weekdays-only, and a pause crossing the edge mid-run. Run, tier, graceReady,
+streak and best compared against the same history never archived: **0 mismatches**. Control:
+the same run with the seed disabled mismatched on all 46 days (tier 5 vs 6).
+
+#### Everything else
+
+- **Morning taps went to yesterday.** Android keeps the app alive overnight; the new day was
+  noticed by a one-minute timer only, and ticks carry their date in the onclick. `newDay()` now
+  runs on visibility, focus, pageshow and - in the capture phase - on every tap: a tap that
+  lands on a stale page is swallowed and the page redrawn. Tested: first tap after a faked
+  midnight logged nothing and redrew; the second logged the new day.
+- **The journal carried yesterday into today.** `jDraft` is keyed `id|day` and the box carries
+  `data-k`, the day it was drawn for; `jType` writes to that day. Typing across midnight now
+  finishes yesterday's entry instead of copying it into today's. An hourly autosave was
+  suggested and not added: every keystroke already reaches localStorage within a second.
+- **A tap during a sync could be undone.** `unionInto` let the remote win every clash. Now the
+  side that saved more recently wins it (`updatedAt`); an import carries no clock, so it only
+  ever adds - which is what its message always claimed. `dataSig` now includes values, so a
+  merge that moves a number repaints and pushes.
+- **Skip days read as misses everywhere but the engine.** New `offDay(h, k)` - the card's
+  schedule, or an empty to-do list - is what every excuse check asks now: strip, ring, graphs,
+  clean-day count, insights, weekday stats, avg7, the header's "x of y". Days off bridge a run
+  in the untouched tone (`OFF_SEG`), not pause blue. Peek says "day off" / "list empty".
+- **An empty to-do list is neutral.** `emptyAt` records when it ran out; adding an item files
+  the spell into `idle`. Only a card with items on it can go amber.
+- **"Chain at risk"** used the odd-miss rule from before fortnightly grace - it went dark on the
+  second missed day. It now asks `chainRun().graceReady`. The "Pause instead" button is gone:
+  pauses start tomorrow by design, and the miss it warned about is today's.
+- **A timer outliving the page** never finished: `timerRun` was restored but only GO started the
+  tick. `timerArm()` is shared; boot resumes it, or finishes it with a notice if it ran out.
+  The running sound does not return - audio needs a tap. Tested with real reloads, both cases.
+- **The to-do subtitle** is `todoSub()`, repainted in place while typing; `repaintTodo` sets
+  `jPending` so the rest of the card catches up when the box is let go.
+- **Typing lost to background renders** - editor, sync settings, past-day journal box.
+  `captureTyping()` reads them at the top of `render()`. The editor is read only when its
+  `data-gen` matches `formGen`, which `openNew`/`openEdit` bump, so switching cards cannot carry
+  the old text across. Tested all three, and the switch.
+- **A comma is a decimal point** in amounts, hours and the budget field. "12,50" was R1250.
+- **Token and passphrase are masked**, with a Show button; `autocomplete="off"`.
+- **Milestones fire when crossed**, not only when landed on - a backfill from 6 to 8 used to
+  skip "One week" for good.
+
+Testing note: the service worker cannot register in the in-app browser on 127.0.0.1 - the
+untouched v85 `sw.js` fails identically there, so it is the environment, not this change.
+
+→ `sw.js v87`, `BUILD v87`.
+
+### 2026-09-29 (later still) — The whole record, and one less way to lose it
+
+#### "Since you started" reads the archive
+
+The Score card's since-start figures - days recorded, perfect days, longest run, points
+earned, best score - were computed from the live file. From the first sweep (~15 Nov) the live
+file is only the last 126 days, so every one of them would have shrunk while "Days since start"
+kept climbing. `fullRecord()` stitches each card's archived days back onto its live ones, as
+export does, and replays the ladder over the whole of it for the points. Empty-list days are
+now filed into the archive slot (`slot.idle`) instead of dropped, so the whole-record replay
+excuses the same days the live one did; export carries them too.
+
+Verified: 300 days across a daily card, a weekdays card, a to-do card with empty spells and a
+hidden card, 441 days swept. Every since-start row identical to the same history unarchived.
+Without the fix: 42% recorded instead of 98%, 450 points instead of 1458, longest run 56
+instead of 116. The v87 45-day daily-sweep simulation re-run with a to-do card added: 920
+checks, 0 mismatches.
+
+The archive is per device: a phone set up fresh from sync has none until a backup is
+restored onto it (the restore puts the old days back and the next sweep files them again).
+
+#### Removed: "Clear all logged days"
+
+A testing tool that outlived testing - a tap and a confirm from losing a card's whole history,
+with nothing it could do that deleting the card could not do more honestly. Gone from the
+editor along with `clearHist` and its three handlers. A single day is still cleared from its
+day chip. ("Clear to here" in the day chip is untouched.)
+
+#### Export records deletions
+
+`exportBundle` now carries `gone`. Before, a backup restored onto a fresh phone could not tell
+"deleted" from "not seen here yet", and the union merge brought every deleted card back.
+Backups made before this still mark such a card `removed: true`; import treats that as its
+tombstone, dated to the export. Verified through the real import flow onto an empty phone,
+with a new backup and with an old-style one: the deleted card stays deleted both times.
+
+#### Small
+
+- The Score card's editor no longer offers "Days it counts" - it has no days of its own.
+- The timer hint says two hours, which is the limit `commit()` has always applied.
+
+→ `sw.js v88`, `BUILD v88`.
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
@@ -2930,6 +3082,10 @@ and now this. → `sw.js v85`.
   is "logging anything counts." Revisit if a target-based streak is ever wanted.
 - **Per-cell pause editing.** Pause is set forward-only via the chooser; there is no
   way to mark a specific past day paused after the fact.
+- **Multi-device clash resolution is per save, not per day.** The newer `updatedAt` wins every
+  clashing day, so two devices editing different days of the same card can still lose one.
+  `pushRemote` also PUTs without merging first, and an un-tick has no tombstone, so another
+  device's copy brings it back. Only matters with one person on two devices.
 
 ## Things that will bite you
 
@@ -2938,6 +3094,9 @@ and now this. → `sw.js v85`.
 - Removing the today-grace from `streak()` — every morning reads "0 days."
 - Treating a counter's `0` as "not logged." Use `has()` (key existence), not
   truthiness. A net-zero day is a logged day.
+- Asking whether a day is excused with `dowOff` or `paused` alone. Use `offDay(h, k)` plus
+  `data.paused` - skip days and empty to-do lists are excuses too, and every view that
+  forgot one of them drew a miss that the engine did not count.
 - Changing `index.html` without bumping `sw.js VERSION` — devices keep serving the
   old cached shell.
 - Collapsing the two repos. The public repo is public; the token is scoped to the

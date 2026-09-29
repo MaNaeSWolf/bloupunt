@@ -603,6 +603,9 @@ let editing   = null;       // habit id | 'new' | null
 let confirm   = null;       // habit id | null
 let expanded  = null;       // habit id | null
 let form      = { name:'', cue:'', stack:'', minimum:'', type:'toggle' };
+let formGen   = 0;          // bumped whenever `form` is replaced by a different card's
+let syncDraft = null;       // sync settings as typed, not yet saved
+let syncShow  = false;      // token and passphrase shown in the clear
 let celebration = null;     // {label, sub, weight}
 let flash     = false;
 let syncOpen  = false;
@@ -612,14 +615,13 @@ let noticeTimer = null;
 let syncDiag  = null;      // [{ok, text}] - result of Test connection, panel only
 let pauseOpen = false;      // pause-days chooser open
 let dayEdit   = null;       // { id, key } — the strip day-edit chip target
-let clearHist = null;       // habit id whose "clear all history" is awaiting confirm
 let chipCut   = null;       // day key whose "clear to here" is awaiting confirm
 let daySel    = null;       // { id, key } — a day picked in a week view, read-only
 /* The page's OWN build id, bumped with the worker's VERSION. The worker reporting its
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v85';
+const BUILD = 'bloupunt-v88';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -667,7 +669,7 @@ window.undo = () => {
   for (const id of new Set(Object.keys(before).concat(Object.keys(after))))
     if (before[id] !== after[id]) flashIds[id] = true;
 
-  dayEdit = null; clearHist = null; confirm = null; editing = null; jrnl = null;
+  dayEdit = null; confirm = null; editing = null; jrnl = null;
   save(false);                       // persist and sync, but the undo is not itself an action
   clearTimeout(flashTimer);
   flashTimer = setTimeout(() => { flashIds = {}; render(); }, 2000);
@@ -742,7 +744,11 @@ async function decryptData(pkg, pass){
    whenever a habit's fields are edited, and the newer stamp wins. Habits predating
    this carry no stamp and count as oldest, so an edited habit always beats an
    untouched one - which is the right answer in every case that can actually arise. */
+// The later archive boundary, whichever device's copy it rides in on.
+const archOf = (a, b) => !a ? b : !b ? a : ((b.edge || '') > (a.edge || '') ? b : a);
 function unionInto(incoming){
+  // A backup file carries no clock, so it never wins a clash: importing only ever adds.
+  const remoteNewer = (incoming.updatedAt || 0) > (data.updatedAt || 0);
   const localById = {}, remoteById = {}, order = [], on = {};
   for (const h of data.habits) localById[h.id] = h;
   for (const h of (incoming.habits||[])) remoteById[h.id] = h;
@@ -757,10 +763,22 @@ function unionInto(incoming){
   data.habits = order.map(id => {
     const l = localById[id], r = remoteById[id];
     if (!(l && r)) return l || r;
-    const days = { ...(l.days||{}), ...(r.days||{}) };   // union, remote wins a clash
-    const extra = { ...(l.extra||{}), ...(r.extra||{}) };// the payload rides with it
+    /* Neither side loses a logged day. Where BOTH hold a day with different values, the
+       side that saved more recently wins it. It used to be the remote every time, which
+       lost taps: opening the app starts a pull, and a counter tapped in the second before
+       it landed was overwritten by the older value still on GitHub. The screen kept the
+       tap - the signature ignored values - and the pending push then sent the old number
+       out. */
+    const [older, newer] = remoteNewer ? [l, r] : [r, l];
+    const days  = { ...(older.days||{}),  ...(newer.days||{}) };
+    const extra = { ...(older.extra||{}), ...(newer.extra||{}) };  // the payload rides with it
     const meta = (r.mAt||0) > (l.mAt||0) ? r : l;        // newer edit wins the fields
-    return { ...meta, days, extra };
+    const out = { ...meta, days, extra };
+    // Not decided by mAt: an archive sweep edits no field, so it stamps nothing, and a
+    // card edited on the other device would otherwise take the boundary away with it.
+    const arch = archOf(l.arch, r.arch);
+    if (arch) out.arch = arch;
+    return out;
   }).filter(h => {
     // A delete sticks unless the habit was edited AFTER it - editing it somewhere else
     // is a clear statement that it is still wanted, and that is the newer intent.
@@ -781,7 +799,11 @@ function dataSig(o){
     // and quietly sat on the correction while the loser kept republishing the old name.
     h: (o.habits||[]).map(x => [x.id, x.name||'', x.type||'', x.dir||'', x.cue||'',
                                 x.stack||'', x.minimum||'', x.mAt||0, x.hidden?1:0,
-                                Object.keys(x.days||{}).sort()]),
+                                // Values too, not only which days exist. With keys alone a
+                                // changed count looked identical, so a merge that moved a
+                                // number neither repainted nor pushed.
+                                Object.keys(x.days||{}).sort().map(k => [k, x.days[k]]),
+                                Object.keys(x.extra||{}).sort().map(k => [k, x.extra[k]])]),
     s: Object.keys(o.seen||{}).sort(),
     p: Object.keys(o.paused||{}).sort(),
     g: Object.keys(o.gone||{}).sort()
@@ -979,6 +1001,37 @@ const isTodo    = h => h.type === 'todo';
 const PRI_COL  = { 1:'var(--clay)', 2:'var(--amber)', 3:'var(--sage)' };
 const PRI_NEXT = { 1:3, 2:1, 3:2 };            // default 2, then 1, then 3, then round again
 const todoList = h => Array.isArray(h.todos) ? h.todos : [];
+/* An empty list asks nothing of the day. With nothing on it there is nothing to tick, so
+   the day cannot be logged - and a day that could not be logged must not count as missed,
+   turn the card amber, or cost a point. So a to-do card excuses every day its list stood
+   empty, exactly as a pause does. Only a card with something on it can fall behind.
+
+   The list keeps no history, so the empty spells are recorded as they happen: `emptyAt` is
+   the day the list last ran out, and adding an item files every day from then to yesterday
+   into `idle`. A list that is empty now with no `emptyAt` - it emptied before this existed -
+   is taken to have run out on the last day anything was ticked, which is how a list
+   normally empties. */
+const lastLogKey = h => Object.keys(h.days || {}).sort().pop() || null;
+function todoIdle(h, k){
+  if (!isTodo(h) || has(h.days || {}, k)) return false;
+  if (h.idle && h.idle[k]) return true;
+  if (todoList(h).length) return false;
+  const from = h.emptyAt || lastLogKey(h);
+  return !!from && k >= from;
+}
+// The list is about to stop being empty: file the empty spell as excused days, up to
+// yesterday. Today is not filed - it has an item on it now, so it counts like any other.
+function fileIdle(h){
+  const from = h.emptyAt || lastLogKey(h);
+  delete h.emptyAt;
+  if (!from) return;
+  const y = midnight(); y.setDate(y.getDate() - 1);
+  const idle = h.idle = h.idle || {};
+  for (const d = parseKey(from); d <= y; d.setDate(d.getDate()+1)){
+    const k = keyFor(d);
+    if (!has(h.days, k)) idle[k] = 1;
+  }
+}
 // Priority first, then oldest first, so a long-standing item is not stuck behind a new one
 // of equal urgency.
 const todoSorted = h => todoList(h).slice().sort((a,b) => (a.p||2)-(b.p||2) || (a.i||0)-(b.i||0));
@@ -1031,6 +1084,19 @@ const dowOff = (h, k) => {
   if (!a || a.length !== 7) return false;
   return !a[(parseKey(k).getDay() + 6) % 7];
 };
+/* A day this card asks nothing of: switched off in its schedule, or a to-do card's empty
+   list. Everything that asks "was this day excused" asks this, not dowOff directly. The
+   engine (chainRun, statsFor) already honoured skip days, but the week strip, its ring,
+   the graphs, the clean-day count and the insights each tested `paused` alone - so a
+   weekdays-only card with a 30-day streak drew as four broken pieces with its ring on
+   Monday only, and broke "Every habit logged" every weekend. */
+const offDay = (h, k) => dowOff(h, k) || todoIdle(h, k);
+// A card that expects something today - live, not the score, and not excused today.
+const allDueDone = () => { const d = dueToday(); return d.length > 0 && d.every(x => has(x.days, todayKey())); };
+const dueToday = () => {
+  const t = todayKey(), p = data.paused || {};
+  return liveHabits().filter(h => !isScore(h) && !p[t] && !offDay(h, t));
+};
 
 /* Budget rides the same side channel as mood: several amounts a day, so `extra[k]` holds
    the individual spends and `days[k]` holds the day's TOTAL - the one number every other
@@ -1058,7 +1124,7 @@ function setSpend(h, k, list){
    Guessing from magnitude ("small means hours, large means minutes") would be wrong
    exactly when someone logs a genuine 90-minute stretch. */
 function parseDur(s){
-  const str = String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, '');
+  const str = String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, '').replace(/,/g, '.');
   if (!str) return NaN;
   let m;
   if ((m = str.match(/^(\d+):([0-5]?\d)$/)))                     return +m[1] * 60 + +m[2];
@@ -1255,7 +1321,7 @@ function avg7(h, d){
   for (let j=0;j<7;j++){
     const x = new Date(d); x.setDate(d.getDate()-j);
     const k = keyFor(x);
-    if (paused[k]) continue;
+    if (paused[k] || offDay(h, k)) continue;
     sum += (days[k] || 0); n++;
   }
   return n ? sum/n : 0;
@@ -1268,7 +1334,7 @@ function unloggedShade(h, d){
   const k = keyFor(d);
   if ((data.paused || {})[k]) return PAUSED_FILL;
   // Not a miss and not a pause - this card simply does not run today.
-  if (dowOff(h, k)) return LEV[0];
+  if (offDay(h, k)) return LEV[0];
   const start = habitStart(h);
   if (start && d < start) return LEV[0];
   if (d >= midnight()) return LEV[0];
@@ -1398,11 +1464,21 @@ const TIER_DAYS = (() => {
 })();
 const tierOf = chain => { let i = 0; while (i+1 < TIER_DAYS.length && chain >= TIER_DAYS[i+1]) i++; return i; };
 
-// Replay a habit's whole history once, returning { points:{dayKey:n}, chain, tier }.
+// Replay a habit's history once, returning { points:{dayKey:n}, run, lvl, tier, ... }.
 // Cached per render pass - render() clears it.
 let _chainCache = {};
-function chainRun(h){
-  if (_chainCache[h.id]) return _chainCache[h.id];
+/* One pass of the ladder from `from` to `to`, starting in `seed` state.
+
+   Split out of chainRun so the archive sweep can run the SAME rules up to its boundary and
+   store where the ladder stood. The replay used to start at the first day ever logged, and
+   after a sweep every archived day was simply absent, so it read as a miss: a 260-day
+   chain came back as 127, a point a day cheaper, and could never climb past the archive
+   window again. Seeded from the stored state, the live replay walks only the days it still
+   has and arrives where the full history would.
+
+   `graceAt` is a day KEY rather than a loop index, so the state means the same thing
+   wherever the replay resumes. */
+function chainReplay(h, seed, from, to){
   const days = h.days || {}, paused = data.paused || {};
   const points = {};
   // A tier is EARNED by a CLEAN run of that many days. The free day protects the level
@@ -1410,29 +1486,48 @@ function chainRun(h){
   // climb. Reaching two points has to mean two unbroken weeks, or the ladder means
   // nothing. Either way a miss ends the clean run; the only question is whether the
   // level survives it.
-  let lvl = 0, run = 0, di = 0, graceAt = null, runDrops = 0;
-  const start = habitStart(h), end = midnight();
-  if (start){
-    for (const d = new Date(start); d <= end; d.setDate(d.getDate()+1)){
-      const k = keyFor(d);
-      if (has(days, k)){
-        run++; runDrops = 0;
-        while (lvl + 1 < TIER_DAYS.length && run >= TIER_DAYS[lvl+1]) lvl++;
-        points[k] = lvl + 1;
-      }
-      else if (paused[k] || dowOff(h, k)){ /* bridges: neither builds nor breaks */ }
-      else if (k === keyFor(end)){ /* today is grace until tomorrow */ }
-      else {
-        if (graceAt === null || (di - graceAt) >= GRACE_EVERY) graceAt = di;  // level holds
-        else { if (lvl > 0) lvl--; runDrops++; }
-        run = 0;                     // a miss always restarts the climb
-      }
-      di++;
+  let lvl = seed ? seed.lvl : 0, run = seed ? seed.run : 0,
+      graceAt = seed ? seed.graceAt : null, runDrops = seed ? seed.runDrops : 0;
+  const todayK = todayKey();
+  for (const d = new Date(from); d <= to; d.setDate(d.getDate()+1)){
+    const k = keyFor(d);
+    if (has(days, k)){
+      run++; runDrops = 0;
+      while (lvl + 1 < TIER_DAYS.length && run >= TIER_DAYS[lvl+1]) lvl++;
+      points[k] = lvl + 1;
+    }
+    else if (paused[k] || offDay(h, k)){ /* bridges: neither builds nor breaks */ }
+    else if (k === todayK){ /* today is grace until tomorrow */ }
+    else {
+      if (graceAt === null || daysBetween(graceAt, k) >= GRACE_EVERY) graceAt = k;  // level holds
+      else { if (lvl > 0) lvl--; runDrops++; }
+      run = 0;                     // a miss always restarts the climb
     }
   }
+  return { points, lvl, run, graceAt, runDrops };
+}
+/* Where the ladder stood at the archive boundary. A card archived before the state was
+   stored carries only the run length at its edge, and the ladder is rebuilt from that -
+   exact for any run that had not already dropped a level. */
+function chainSeed(h){
+  const a = h.arch;
+  if (!a || !a.edge) return null;
+  if (a.chain) return a.chain;
+  const run = a.edgeRun || 0;
+  return { lvl: tierOf(run), run, graceAt: null, runDrops: 0 };
+}
+function chainRun(h){
+  if (_chainCache[h.id]) return _chainCache[h.id];
+  const seed = chainSeed(h);
+  let from = null;
+  if (seed){ from = parseKey(h.arch.edge); from.setDate(from.getDate() + 1); }
+  else from = habitStart(h);
+  const st = from ? chainReplay(h, seed, from, midnight())
+                  : { points:{}, lvl:0, run:0, graceAt:null, runDrops:0 };
+  const { points, lvl, run, graceAt, runDrops } = st;
   const res = { points, run, lvl, tier: lvl + 1, runDrops,
                 need: lvl + 1 < TIER_DAYS.length ? TIER_DAYS[lvl+1] - run : 0,
-                graceReady: graceAt === null || (di - 1 - graceAt) >= GRACE_EVERY };
+                graceReady: graceAt === null || daysBetween(graceAt, todayKey()) >= GRACE_EVERY };
   _chainCache[h.id] = res;
   return res;
 }
@@ -1462,10 +1557,10 @@ function statsFor(h){
   const days = h.days || {};
   const paused = data.paused || {};
   const keys = Object.keys(days).sort();
-  if (!keys.length) return { streak:0, best:0, last30:0, missed:0 };
+  if (!keys.length) return { streak:0, best:(h.arch && h.arch.best) || 0, last30:0, missed:0 };
 
   const kept    = k => has(days, k);       // any record counts - the goal is to log
-  const excused = k => !!paused[k] || dowOff(h, k);   // paused, or a day this card skips
+  const excused = k => !!paused[k] || offDay(h, k);   // paused, or a day this card skips
 
   // consecutive missed (unlogged, non-paused) days ending yesterday
   let missed = 0, g = 0;
@@ -1479,11 +1574,19 @@ function statsFor(h){
   }
 
   // current streak: kept days ending today; today's absence is grace, pauses bridge
+  const a = h.arch;
   let streak = 0, g2 = 0;
   const c = midnight();
   if (!kept(keyFor(c))) c.setDate(c.getDate()-1);
   while (g2++ < 4000){
     const k = keyFor(c);
+    /* Walked unbroken back to the archive boundary: the run carries on into the archive,
+       which recorded how long it was there. Tested before `kept`, so a day a sync handed
+       back across the boundary is not counted twice. This replaced a check that the first
+       live day sat right after the boundary AND the streak covered every calendar day
+       since - which failed the first weekend on a weekday card, and failed outright on the
+       second sweep, when the new edge is a single day and its own run is 1. */
+    if (a && a.edge && k === a.edge){ streak += a.edgeRun || 0; break; }
     if (kept(k)) { streak++; c.setDate(c.getDate()-1); continue; }
     if (excused(k)) { c.setDate(c.getDate()-1); continue; }
     break;
@@ -1522,16 +1625,7 @@ function statsFor(h){
      single thing it exists to protect. `edgeRun` is the length of the run that was still
      going when the history was archived; it only counts if the live streak has walked all
      the way back to the boundary without a break. */
-  const a = h.arch;
-  if (a){
-    if (a.edge && a.edgeRun && streak > 0){
-      const first = keys.length ? keys[0] : null;
-      const after = parseKey(a.edge); after.setDate(after.getDate()+1);
-      if (first && first === keyFor(after) && streak >= daysBetween(first, todayKey()) + 1)
-        streak += a.edgeRun;
-    }
-    best = Math.max(best, a.best || 0, streak);
-  }
+  if (a) best = Math.max(best, a.best || 0, streak);
 
   return { streak, best, last30, missed };
 }
@@ -1569,11 +1663,15 @@ const archiveSave = a => {
 // so an archived run and a live one never disagree about what a streak is.
 function runEndingAt(h, key){
   const days = h.days || {}, paused = data.paused || {};
-  const excused = k => !!paused[k] || dowOff(h, k);
+  const excused = k => !!paused[k] || offDay(h, k);
+  const a = h.arch;
   let run = 0, g = 0;
   const c = parseKey(key);
   while (g++ < 4000){
     const k = keyFor(c);
+    // Reached the previous boundary unbroken: the run continues into the archive. Without
+    // this, every sweep after the first measured a one-day run and the streak collapsed.
+    if (a && a.edge && k === a.edge){ run += a.edgeRun || 0; break; }
     if (has(days, k)){ run++; c.setDate(c.getDate()-1); continue; }
     if (excused(k)){ c.setDate(c.getDate()-1); continue; }
     break;
@@ -1606,8 +1704,19 @@ function archiveSweep(){
     const edge = old[old.length - 1];
     a.best  = Math.max(a.best || 0, before.best);
     a.start = a.start && a.start < old[0] ? a.start : old[0];
-    a.edge  = edge;
-    a.edgeRun = runEndingAt(h, edge);                             // carries a streak across
+    /* The boundary only moves forward. A sync can hand back days already archived here;
+       they are filed again below, but the ladder and the carried run were settled when
+       those days first crossed, and recomputing from a partial history would undercount. */
+    if (!a.edge || edge > a.edge){
+      const seed = chainSeed(h);
+      let from;
+      if (seed){ from = parseKey(a.edge); from.setDate(from.getDate() + 1); }
+      else from = habitStart(h);
+      const st = chainReplay(h, seed, from, parseKey(edge));       // the ladder at the edge
+      a.chain = { lvl: st.lvl, run: st.run, graceAt: st.graceAt, runDrops: st.runDrops };
+      a.edgeRun = runEndingAt(h, edge);        // before a.edge moves: it reads the old one
+      a.edge  = edge;
+    }
     const slot = arc.cards[h.id] = arc.cards[h.id] || { name:h.name, type:h.type, days:{}, extra:{} };
     slot.name = h.name; slot.type = h.type;                       // keep the labels current
     for (const k of old){
@@ -1619,6 +1728,13 @@ function archiveSweep(){
       if (h.extra && h.extra[k] !== undefined){ slot.extra[k] = h.extra[k]; delete h.extra[k]; }
       delete days[k];
       moved++;
+    }
+    // Empty-list days behind the edge are settled into the ladder state, so the live file
+    // keeps only the ones its replay still walks. The rest are filed with the days, because
+    // the whole-record replay behind "Since you started" still has to excuse them.
+    if (h.idle) for (const k of Object.keys(h.idle)) if (k <= a.edge){
+      (slot.idle = slot.idle || {})[k] = 1;
+      delete h.idle[k];
     }
     cards++;
   }
@@ -1640,7 +1756,8 @@ function exportBundle(){
     const slot = (arc.cards || {})[h.id] || { days:{}, extra:{} };
     out.habits.push({ ...h,
       days:  { ...(slot.days  || {}), ...(h.days  || {}) },
-      extra: { ...(slot.extra || {}), ...(h.extra || {}) } });
+      extra: { ...(slot.extra || {}), ...(h.extra || {}) },
+      idle:  { ...(slot.idle  || {}), ...(h.idle  || {}) } });
   }
   // Cards deleted since they were archived still have their history worth keeping.
   for (const id of Object.keys(arc.cards || {})){
@@ -1650,6 +1767,11 @@ function exportBundle(){
   }
   out.paused = data.paused || {};
   out.seen   = data.seen || {};
+  /* Which cards were deleted, and when. Without it a backup restored onto a fresh phone had
+     no way to tell "deleted" from "not seen here yet", and the merge - a union - brought
+     every deleted card back, archived history and all. The tombstones ride along, so the
+     restore deletes them again exactly as the original device did. */
+  out.gone   = data.gone || {};
   return out;
 }
 
@@ -1657,14 +1779,19 @@ function perfectStreak(){
   const habits = liveHabits().filter(h => !isScore(h));  // the score isn't a habit you do
   if (!habits.length) return 0;
   const paused = data.paused || {};
-  const allDone = d => habits.every(h => has(h.days||{}, keyFor(d)));        // recorded, any type
+  /* A card's day off is not a card left undone. Before this, one weekdays-only card ended
+     the clean-day count every Saturday. A day on which EVERY card is off is a bridge, like
+     a pause: nothing was asked, so it neither builds the run nor breaks it. */
+  const due     = k => habits.filter(h => !offDay(h, k));
+  const allDone = k => { const n = due(k); return n.length > 0 && n.every(h => has(h.days||{}, k)); };
+  const noneDue = k => due(k).length === 0;
   let n = 0, g = 0;
   const c = midnight();
-  if (!allDone(c)) c.setDate(c.getDate()-1);
+  if (!allDone(keyFor(c))) c.setDate(c.getDate()-1);
   while (g++ < 4000){
     const k = keyFor(c);
-    if (allDone(c)) { n++; c.setDate(c.getDate()-1); continue; }
-    if (paused[k]) { c.setDate(c.getDate()-1); continue; }               // pauses bridge
+    if (allDone(k)) { n++; c.setDate(c.getDate()-1); continue; }
+    if (paused[k] || noneDue(k)) { c.setDate(c.getDate()-1); continue; }   // pauses bridge
     break;
   }
   return n;
@@ -1698,7 +1825,7 @@ function checkMilestones(){
   const p = perfectStreak();
   for (const m of PERFECT_MARKS){
     const id = 'perfect:'+m.d;
-    if (p === m.d && !data.seen[id])
+    if (p >= m.d && !data.seen[id])
       hits.push({ id, label:m.label, weight:m.weight, sub:'Every habit, '+m.d+' days straight' });
   }
 
@@ -1707,7 +1834,9 @@ function checkMilestones(){
     const s = statsFor(h);                               // counters earn recording streaks too
     for (const m of STREAK_MARKS){
       const id = 'streak:'+h.id+':'+m.d;
-      if (s.streak === m.d && !data.seen[id])
+      // Crossed, not landed on exactly. Backfilling two days can take a streak from 6 to
+      // 8, and an exact test meant that card's "One week" could never fire.
+      if (s.streak >= m.d && !data.seen[id])
         hits.push({ id, label:m.label, weight:m.weight, sub:h.name });
     }
   }
@@ -1724,11 +1853,11 @@ function checkMilestones(){
 window.toggle = (id, k) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  const wasAll = liveHabits().filter(x=>!isScore(x)).length > 0 && liveHabits().filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
+  const wasAll = allDueDone();
 
   if (h.days[k]) delete h.days[k]; else h.days[k] = 1;
 
-  const nowAll = liveHabits().filter(x=>!isScore(x)).length > 0 && liveHabits().filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
+  const nowAll = allDueDone();
   if (k === todayKey() && nowAll && !wasAll && data.habits.length > 1){
     flash = true;
     setTimeout(() => { flash = false; render(); }, 1400);
@@ -1741,7 +1870,7 @@ window.toggle = (id, k) => {
 
 window.setScreen = s => {
   grab(); screen = s; editing = null; confirm = null; dayEdit = null; daySel = null;
-  clearHist = null; jrnl = null; render();
+  jrnl = null; render();
 };
 
 window.toggleExpand = id => { expanded = (expanded === id) ? null : id; dayEdit = null; chipCut = null; render(); };
@@ -1751,9 +1880,9 @@ window.toggleExpand = id => { expanded = (expanded === id) ? null : id; dayEdit 
 window.bump = (id, k, delta) => {
   const h = data.habits.find(x => x.id === id);
   if (!h) return;
-  const wasAll = liveHabits().filter(x=>!isScore(x)).length > 0 && liveHabits().filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
+  const wasAll = allDueDone();
   h.days[k] = (h.days[k] || 0) + delta;    // net value persists even at 0 - the goal is to log
-  const nowAll = liveHabits().filter(x=>!isScore(x)).length > 0 && liveHabits().filter(x=>!isScore(x)).every(x => has(x.days, todayKey()));
+  const nowAll = allDueDone();
   if (k === todayKey() && nowAll && !wasAll && data.habits.length > 1){
     flash = true;
     setTimeout(() => { flash = false; render(); }, 1400);
@@ -1771,7 +1900,7 @@ window.bump = (id, k, delta) => {
 // Money is a decimal; time is 30m, 1h30, 1:30 or a bare number of hours.
 const cycleParse = (h, raw) => isHours(h)
   ? parseDur(raw)
-  : Math.round(parseFloat(String(raw).replace(/[^0-9.\-]/g, '')) * 100) / 100;
+  : Math.round(parseFloat(String(raw).replace(/,/g, '.').replace(/[^0-9.\-]/g, '')) * 100) / 100;
 const cycleFmt = (h, v) => isHours(h) ? fmtGap(v) : fmtMoney(h, v);
 window.spendType = el => { spendDraft[el.dataset.h] = el.value; };
 /* Without this the card froze. Focusing the amount box takes the no-render guard, and
@@ -1879,12 +2008,17 @@ window.jTouch = el => {
    sync push. The text itself is never later than the keystroke. */
 window.jType = el => {
   const id = +el.dataset.h;
-  jDraft[el.dataset.h] = el.value;
+  /* The box writes to the day it was drawn for, not to whatever day it is now. Typing that
+     carries on past midnight used to land in the new day - the whole of the evening's
+     entry copied into tomorrow's. The day is fixed when the box is drawn; the next render
+     after the box is let go draws the new day's box, empty. */
+  const k = el.dataset.k || todayKey();
+  jDraft[el.dataset.h + '|' + k] = el.value;
   jFocus = el.dataset.h; jSel = el.selectionStart;
 
   const h = data.habits.find(x => x.id === id);
   if (h){
-    setJournal(h, todayKey(), el.value);
+    setJournal(h, k, el.value);
     /* Throttled, not every keystroke: persist() serialises the WHOLE store, and doing
        that per character is real work on a phone with months of history behind it.
        Leading edge at most once a second, trailing edge 300ms after you stop, so the
@@ -1895,7 +2029,7 @@ window.jType = el => {
     jPersistTimer = setTimeout(() => { jPersistTimer = null; jPersistAt = Date.now(); persist(); }, 300);
 
     const sl = document.getElementById('jSub' + id);
-    if (sl) sl.textContent = journalSub(h, todayKey(), statsFor(h));
+    if (sl) sl.textContent = journalSub(h, k, statsFor(h));
   }
   clearTimeout(jSaveTimer);
   jSaveTimer = setTimeout(() => { jSaveTimer = null; save(false); }, 1200);
@@ -2075,7 +2209,7 @@ let peekTimer = null;
 let moodDraft = {};        // slider positions, per card - not persisted
 let spendDraft = {};       // half-typed amounts, per card - not persisted
 let jrnl      = null;      // { id, key, text } - the PAST-day editor, opened from the calendar
-let jDraft    = {};        // habit id -> today's text as typed, survives a re-render
+let jDraft    = {};        // 'id|day' -> that day's text as typed, survives a re-render
 let jFocus    = null;      // habit id whose box had focus, to restore after a render
 let jSel      = 0;         // and where the caret was
 let jSaveTimer = null;
@@ -2143,21 +2277,17 @@ window.clearDay = (id, k) => {
   save(); render();
 };
 
-// Wipe a habit's entire logged history - the escape hatch for an accidental backfill.
-window.askClearHist    = () => { clearHist = editing; render(); };
-window.cancelClearHist = () => { clearHist = null; render(); };
-window.doClearHist     = () => {
-  const h = data.habits.find(x => x.id === editing);
-  if (h) { h.days = {}; h.extra = {}; save(); }
-  clearHist = null; render();
-};
+/* There was a "Clear all logged days" here - wipe a card's whole history and keep the card.
+   It was a testing tool that had outlived testing: one tap and a confirm from losing months,
+   with nothing it could do that deleting the card could not do more honestly. Removed in v88.
+   A single day is still cleared from its day chip. */
 
 window.openNew = () => {
   form = { name:'', cue:'', stack:'', minimum:'', type:null, dir:'up',
            budget:'', target:'', period:'week', pdays:7, cur:'R',
            secs:TIMER_DEF, endSnd:'chime', runSnd:'none',
            dows:[1,1,1,1,1,1,1] };
-  editing = 'new'; confirm = null; screen = 'manage'; render();
+  formGen++; editing = 'new'; confirm = null; screen = 'manage'; render();
 };
 
 window.openEdit = id => {
@@ -2169,7 +2299,7 @@ window.openEdit = id => {
            period:h.period||'week', pdays:h.pdays||7, cur:h.cur||'R',
            secs:timerSecs(h), endSnd:h.endSnd||'chime', runSnd:h.runSnd||'none',
            dows:(h.dows && h.dows.length===7) ? h.dows.slice() : [1,1,1,1,1,1,1] };
-  editing = id; confirm = null; clearHist = null; render();
+  formGen++; editing = id; confirm = null; render();
 };
 
 window.cancelEdit = () => { editing = null; render(); };
@@ -2216,7 +2346,7 @@ window.commit = () => {
     payload.anchor = (exh && exh.anchor) || todayKey();
   }
   if (payload.type === 'budget'){
-    payload.budget = Math.max(0, +String(form.budget).replace(/[^0-9.]/g,'') || 0);
+    payload.budget = Math.max(0, +String(form.budget).replace(/,/g,'.').replace(/[^0-9.]/g,'') || 0);
     payload.period = form.period || 'week';
     payload.pdays  = Math.max(1, Math.round(+form.pdays || 7));
     payload.cur    = (String(form.cur || 'R').trim() || 'R').slice(0, 3);
@@ -2234,7 +2364,7 @@ window.commit = () => {
       if (famOf(h.type||'toggle') !== famOf(payload.type)){
         h.days = {}; h.extra = {};
         // The list and its tally are as type-specific as the days are.
-        delete h.todos; delete h.made;
+        delete h.todos; delete h.made; delete h.idle; delete h.emptyAt;
       }
       Object.assign(h, payload, { mAt: Date.now() });
     }
@@ -2282,11 +2412,13 @@ window.doRemove = id => {
 
 window.closeCelebration = () => { celebration = null; render(); };
 
-window.toggleSyncPanel = () => { syncOpen = !syncOpen; render(); };
+window.toggleSyncPanel = () => { syncOpen = !syncOpen; syncDraft = null; render(); };
+window.toggleSyncShow  = () => { syncShow = !syncShow; render(); };
 window.saveSync = () => {
   const v = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
   sync = { owner:v('inOwner'), repo:v('inRepo'), token:v('inToken'), pass:v('inPass'),
            file:v('inFile') };
+  syncDraft = null;
   try { localStorage.setItem('bloupunt-sync', JSON.stringify(sync)); } catch(e){}
   syncStatus = sync.token ? 'idle' : 'off';
   syncDiag = null;
@@ -2430,6 +2562,11 @@ window.importData = () => {
       try {
         const obj = JSON.parse(reader.result);
         if (!obj || !Array.isArray(obj.habits)) throw new Error('shape');
+        // Backups made before deletions were exported still mark a deleted card `removed`.
+        // Treat that as its tombstone, dated to the export, so it stays deleted.
+        const when = Date.parse(obj.exportedAt) || 1;
+        for (const h of obj.habits) if (h.removed && !(obj.gone || {})[h.id])
+          (obj.gone = obj.gone || {})[h.id] = when;
         const before = dataSig(data);
         unionInto(obj);
         save();
@@ -2447,6 +2584,25 @@ window.importData = () => {
   };
   inp.click();
 };
+
+/* Anything being typed that is NOT behind the render guard, read back before the page is
+   replaced: the card editor, the sync settings, the past-day journal box. They used to be
+   read only by the buttons that act on them, so a background render - a sync landing, the
+   undo highlight clearing, a timer finishing - put them back to their last saved text
+   mid-sentence. The editor is read only when the form on screen IS the form in memory:
+   opening another card swaps `form` first, and reading the old inputs into it would undo
+   that. */
+const readSyncInputs = () => {
+  const v = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+  return { owner:v('inOwner'), repo:v('inRepo'), file:v('inFile'), token:v('inToken'), pass:v('inPass') };
+};
+function captureTyping(){
+  const ed = document.querySelector('.editor[data-gen]');
+  if (ed && +ed.dataset.gen === formGen) grab();
+  if (syncOpen && document.getElementById('inOwner')) syncDraft = readSyncInputs();
+  const jb = document.getElementById('jBox');
+  if (jb && jrnl) jrnl.text = jb.value;
+}
 
 // Keep in-progress form text across re-renders
 function grab(){
@@ -2470,7 +2626,7 @@ function grab(){
    back afterwards, which is the same bargain grab() already strikes for the editor. */
 function grabJournals(){
   for (const el of document.querySelectorAll('.jInline')){
-    jDraft[el.dataset.h] = el.value;
+    jDraft[el.dataset.h + '|' + (el.dataset.k || todayKey())] = el.value;
     if (document.activeElement === el){ jFocus = el.dataset.h; jSel = el.selectionStart; }
   }
 }
@@ -2705,6 +2861,9 @@ const CHEV_SVG = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none">'+
 // (a lighter segment keeps the bar going) so an intentional break isn't a failure.
 const N_DAYS = 21;
 const PAUSE_SEG = '#C3D5E0';
+// A day off inside a run: the bar carries on through it, in the untouched tone rather than
+// the pause blue, because nobody declared a break - the card simply does not run that day.
+const OFF_SEG = LEV[0];
 /* One day of one habit, in the fewest characters that still say something. Toggles are
    deliberately missing from the callers: "done" printed over a solid green block says
    nothing the block did not already say, and a bubble that adds nothing is clutter. */
@@ -2722,7 +2881,8 @@ function peekValue(h, k){
   }
   if (!isTime(h) && !isCounter(h) && !isMood(h) && !isCycle(h)) return '';
   if (!has(h.days, k))
-    return (data.paused && data.paused[k]) ? 'paused' : 'not logged';
+    return (data.paused && data.paused[k]) ? 'paused'
+      : todoIdle(h, k) ? 'list empty' : dowOff(h, k) ? 'day off' : 'not logged';
   const v = h.days[k];
   if (isTime(h)) return v >= NONE_MIN ? 'didn\u2019t happen' : fmtTime(v);
   if (isMood(h)){
@@ -2763,6 +2923,7 @@ function chainStrip(h){
       k,
       logged: has(h.days, k),
       paused: !!(data.paused && data.paused[k] && !has(h.days,k)),
+      off:    !has(h.days,k) && offDay(h, k),
       today:  k===today,
       sel:    !!(daySel && daySel.id===h.id && daySel.key===k),
       bg:     counter ? col(d) : shade(h,d)
@@ -2775,7 +2936,7 @@ function chainStrip(h){
   for (let n=0;n<logged.length-1;n++){
     const a = logged[n], b = logged[n+1];
     let bridged = true;
-    for (let m=a+1;m<b;m++){ if (!info[m].paused){ bridged = false; break; } }
+    for (let m=a+1;m<b;m++){ if (!info[m].paused && !info[m].off){ bridged = false; break; } }
     if (bridged) for (let m=a+1;m<b;m++) inRun[m] = true;
   }
 
@@ -2793,7 +2954,7 @@ function chainStrip(h){
       const first = !inRun[i-1], last = !inRun[i+1];
       const shape = first&&last ? 's4' : first ? 's1' : last ? 's3' : 's2';
       const div = last ? '' : ' div';                           // interior day divider
-      const fill = x.logged ? x.bg : PAUSE_SEG;
+      const fill = x.logged ? x.bg : x.paused ? PAUSE_SEG : OFF_SEG;
       inner = '<div class="seg '+shape+div+(x.sel?' selSeg':'')+'" style="background:'+fill+'"></div>';
     }
     return '<div class="rslot" role="button" tabindex="0" aria-label="'+lab+'" onclick="'+act+'" '+
@@ -2807,21 +2968,27 @@ function chainStrip(h){
   // never extends the clean run - so a ring that bridged a missed day drew a chain that
   // was not being earned. Stop at the first miss. A plain 5-day streak earns nothing
   // extra and gets no ring.
+  // Days off bridge exactly as pauses do - chainRun treats them identically, so the ring
+  // must too. Both ends are then trimmed to a logged day, so the ring always opens and
+  // closes on something you did rather than on a bridge.
+  const holds = x => x.logged || x.paused || x.off;
   let ring = '';
   if (chainRun(h).tier > 1){
     let i = N_DAYS - 1;
-    if (!info[i].logged && !info[i].paused) i--;          // today is grace until tomorrow
-    if (i >= 0 && (info[i].logged || info[i].paused)){
-      const last = i;
-      while (i >= 0 && (info[i].logged || info[i].paused)) i--;
+    if (!holds(info[i])) i--;                             // today is grace until tomorrow
+    if (i >= 0 && holds(info[i])){
+      let last = i;
+      while (i >= 0 && holds(info[i])) i--;
       const openLeft = i < 0;                             // runs off the visible window
       let first = i + 1;
       while (first < last && !info[first].logged) first++;
+      while (last > first && !info[last].logged) last--;
       const l = (first / N_DAYS) * 100, w = ((last - first + 1) / N_DAYS) * 100;
       // calc() widens it 2px past the slot on each side; percentages alone would sit
       // flush against the rounded cap of the last segment.
-      ring = '<div class="chainRing'+(openLeft?' openL':'')+'" style="left:calc('+l.toFixed(2)+
-        '% - 4px);width:calc('+w.toFixed(2)+'% + 8px)"></div>';
+      if (info[first].logged)                             // bridges alone earn no ring
+        ring = '<div class="chainRing'+(openLeft?' openL':'')+'" style="left:calc('+l.toFixed(2)+
+          '% - 4px);width:calc('+w.toFixed(2)+'% + 8px)"></div>';
     }
   }
   // Every card on this strip gets a bubble now - the counter's number, the toggle's
@@ -2902,8 +3069,15 @@ function fullGrid(h){
 // penalised in pairs, so an odd miss count means the next one lands.
 function rowRisk(h){
   const s = statsFor(h);
-  const tier = chainRun(h).tier;
-  const atRisk = (s.missed % 2 === 1) && tier >= 2 && !has(h.days, todayKey());
+  const r = chainRun(h), tier = r.tier, t = todayKey();
+  /* The next miss costs a level exactly when the free day is not there to absorb it, so
+     this asks chainRun's own graceReady and the warning cannot disagree with the ladder.
+     It used to be "an odd number of misses", left over from when every second miss
+     dropped a level: it lit on the 1st, 3rd and 5th missed day and went dark on the 2nd,
+     while the card's own note said each further day cost a point. Shown only once a day
+     has actually been missed, and never on a day this card is excused. */
+  const atRisk = s.missed >= 1 && tier >= 2 && !r.graceReady && !has(h.days, t) &&
+    !(data.paused || {})[t] && !offDay(h, t);
   const miss = s.missed >= 21 ? ' m21' : s.missed >= 7 ? ' m7' : s.missed >= 1 ? ' m1' : '';
   return { atRisk, tier, cls: miss + (atRisk ? ' atRisk' : '') };
 }
@@ -2911,8 +3085,10 @@ function riskBlock(r){
   if (!r.atRisk) return '';
   const drop = r.tier - 1;
   return '<div class="riskBar">'+
-    '<span>Chain at risk — one more missed day drops this to '+drop+' point'+(drop===1?'':'s')+' a day.</span>'+
-    '<button class="chipBtn" onclick="togglePause()">Pause instead</button>'+
+    /* No "Pause instead" button any more. A pause starts tomorrow, on purpose - breaks are
+       planned, not reached for - and the miss this warns about is today's, so the button
+       could never have saved the chain it was offered for. */
+    '<span>Chain at risk — if today goes unlogged, this drops to '+drop+' point'+(drop===1?'':'s')+' a day.</span>'+
   '</div>';
 }
 
@@ -3016,6 +3192,7 @@ function timeGraph(h){
     const k = keyFor(d);
     return { k, v: h.days[k], logged: has(h.days,k),
              paused: !!(data.paused && data.paused[k] && !has(h.days,k)),
+             off: !has(h.days,k) && offDay(h, k),
              today: k===today, sel: !!(daySel && daySel.id===h.id && daySel.key===k) };
   });
 
@@ -3036,7 +3213,7 @@ function timeGraph(h){
   for (let n=0;n<idx.length-1;n++){
     const a = idx[n], b = idx[n+1];
     let bridged = true;
-    for (let m=a+1;m<b;m++){ if (!info[m].paused){ bridged = false; break; } }
+    for (let m=a+1;m<b;m++){ if (!info[m].paused && !info[m].off){ bridged = false; break; } }
     if (!bridged) continue;
     segs += '<line x1="'+xOf(a).toFixed(2)+'%" y1="'+yOf(info[a].v).toFixed(1)+
             '" x2="'+xOf(b).toFixed(2)+'%" y2="'+yOf(info[b].v).toFixed(1)+
@@ -3142,7 +3319,8 @@ function journalRow(h, today){
      beside it would be a second way to say the same thing - one that could disagree.
      The box sits above the week strip so the first thing under the name is somewhere to
      type, already showing what today holds. */
-  const draft = jDraft[h.id] != null ? jDraft[h.id] : text;
+  const dk = h.id + '|' + today;
+  const draft = jDraft[dk] != null ? jDraft[dk] : text;
   return '<div class="'+cls+'">'+
     '<div class="top">'+
       '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
@@ -3152,7 +3330,7 @@ function journalRow(h, today){
       chevBtn(h, open)+
     '</div>'+
     riskBlock(risk) + chainStrip(h) +
-    '<textarea class="jInline'+(open?' open':'')+'" data-h="'+h.id+'" '+
+    '<textarea class="jInline'+(open?' open':'')+'" data-h="'+h.id+'" data-k="'+today+'" '+
       'aria-label="Today\u2019s entry for '+esc(h.name)+'" placeholder="Write something\u2026" '+
       'onfocus="jTouch(this)" oninput="jType(this)" onblur="jLeave(this)">'+esc(draft)+'</textarea>'+
     expBlock +
@@ -3184,7 +3362,8 @@ function readHM(key){
     const el = document.querySelector('.spendIn[data-h="'+key+'"][data-u="'+u+'"]');
     return el ? el.value : (spendDraft[key + ':' + u] || '');
   };
-  const hh = parseFloat(g('h')) || 0, mm = parseFloat(g('m')) || 0;
+  const num = u => parseFloat(String(g(u)).replace(/,/g, '.')) || 0;
+  const hh = num('h'), mm = num('m');
   return Math.round(hh * 60 + mm);
 }
 function clearHM(key){
@@ -3523,6 +3702,11 @@ function timerBegin(h){
   timerRun = { id: h.id, startedAt: Date.now(), secs: timerSecs(h) };
   timerSave();
   runNode = startRunSound(h.runSnd || 'none');
+  timerArm();
+}
+// The tick and the screen lock, without the sound - shared by GO and by a timer resumed
+// after a reload, where audio cannot start again until the next tap.
+function timerArm(){
   takeWakeLock();
   if (timerTick) clearInterval(timerTick);
   timerTick = setInterval(() => {
@@ -3694,10 +3878,26 @@ function todoItemHTML(h, it, editable){
   '</div>';
 }
 
+// The line under the card's name. Its own function so that adding an item mid-typing can
+// repaint it in place - the full render that would otherwise redraw it is held back until
+// the box is let go, and the card said "Nothing on the list" over a list of five.
+function todoSub(h, today){
+  const list = todoList(h);
+  const doneToday = typeof h.days[today] === 'number' ? h.days[today] : 0;
+  const s = statsFor(h);
+  const logged = has(h.days, today);
+  const warn = !logged && s.missed === 1, alarm = !logged && s.missed >= 2;
+  const urgent = list.filter(x => (x.p||2) === 1).length;
+  return (alarm || warn) ? missNote(h, s)
+    : doneToday ? doneToday + ' ticked off today' +
+        (list.length ? ' \u00b7 ' + list.length + ' left' : ' \u00b7 list clear')
+    : list.length ? list.length + ' on the list' + (urgent ? ' \u00b7 ' + urgent + ' urgent' : '')
+    : 'Nothing on the list';
+}
+
 function todoRow(h, today){
   const open = expanded === h.id;
   const list = todoSorted(h);
-  const doneToday = typeof h.days[today] === 'number' ? h.days[today] : 0;
   const s = statsFor(h);
   const risk = rowRisk(h);
   const logged = has(h.days, today);
@@ -3710,16 +3910,10 @@ function todoRow(h, today){
     (alarm?' alarm':'') + (!alarm&&warn?' warn':'') +
     risk.cls + (flashIds[h.id]?' undone':'');
 
-  const urgent = list.filter(x => (x.p||2) === 1).length;
-  const sub = (alarm || warn) ? missNote(h, s)
-    : doneToday ? doneToday + ' ticked off today' +
-        (list.length ? ' \u00b7 ' + list.length + ' left' : ' \u00b7 list clear')
-    : list.length ? list.length + ' on the list' + (urgent ? ' \u00b7 ' + urgent + ' urgent' : '')
-    : 'Nothing on the list';
+  const sub = todoSub(h, today);
 
   const shown = open ? list.slice(0, Math.max(OPEN_N, list.length)) : list.slice(0, TOP_N);
   const items = shown.map(it => todoItemHTML(h, it, open)).join('');
-  const pend = todoPri[h.id] || 2;
   const listBlock =
     '<div class="todoBox">'+
       (list.length
@@ -3730,9 +3924,7 @@ function todoRow(h, today){
           'placeholder="Add something" aria-label="Add an item" '+
           'onfocus="todoFocus(this)" oninput="todoType('+h.id+',this)" '+
           'onkeydown="todoKey(event,'+h.id+')" onblur="todoBlur(this)">'+
-        '<button type="button" class="todoP" style="background:'+PRI_COL[pend]+'" '+
-          'aria-label="Priority '+pend+' for the next item, tap to change" '+
-          'onclick="cyclePri('+h.id+')">'+pend+'</button>'+
+        todoPendBtn(h.id)+
       '</div>'+
     '</div>';
 
@@ -3755,7 +3947,7 @@ function todoRow(h, today){
     '<div class="top">'+
       '<button class="nameBtn" onclick="toggleExpand('+h.id+')">'+
         '<div class="nameLine"><span class="hname">'+esc(h.name)+'</span>'+ptsPill(h)+'</div>'+
-        '<div class="streak">'+sub+'</div>'+
+        '<div class="streak" id="tdSub'+h.id+'">'+sub+'</div>'+
       '</button>'+
       chevBtn(h, open)+
     '</div>'+
@@ -3778,7 +3970,25 @@ window.todoBlur  = releaseTyping;
 window.todoEditBlur = el => { save(); releaseTyping(el); };
 window.todoType = (id, el) => { todoDraft[id] = el.value; };
 window.todoKey  = (ev, id) => { if (ev.key === 'Enter'){ ev.preventDefault(); addTodo(id); } };
-window.cyclePri = id => { todoPri[id] = PRI_NEXT[todoPri[id] || 2]; render(); };
+/* The add line's priority button. Typing an item and then setting its priority is the
+   normal order, so a tap here must not end the typing. Two things were ending it: the
+   button's mousedown took focus off the box, which on Android takes the keyboard with it,
+   and cyclePri then called render(), which replaces the box anyway. So the button refuses
+   focus - preventDefault on mousedown keeps it on the input and the click still fires -
+   and while the guard is held only the button itself is repainted. Enter then adds the
+   item without the box having to be tapped again. */
+function todoPendBtn(id){
+  const p = todoPri[id] || 2;
+  return '<button type="button" class="todoP" data-pend="'+id+'" style="background:'+PRI_COL[p]+'" '+
+    'aria-label="Priority '+p+' for the next item, tap to change" '+
+    'onmousedown="event.preventDefault()" onclick="cyclePri('+id+')">'+p+'</button>';
+}
+window.cyclePri = id => {
+  todoPri[id] = PRI_NEXT[todoPri[id] || 2];
+  const btn = document.querySelector('.todoP[data-pend="'+id+'"]');
+  if (jTyping !== null && btn) btn.outerHTML = todoPendBtn(id);
+  else render();
+};
 
 window.addTodo = id => {
   const h = data.habits.find(x => x.id === id);
@@ -3786,6 +3996,7 @@ window.addTodo = id => {
   const el = document.querySelector('.todoIn[data-h="t'+id+'"]');
   const text = String((el ? el.value : todoDraft[id]) || '').trim();
   if (!text) return;
+  if (!todoList(h).length) fileIdle(h);          // an empty spell ends here
   h.todos = todoList(h).concat([{ i: Date.now(), t: text.slice(0, 200), p: todoPri[id] || 2 }]);
   h.made = (+h.made || 0) + 1;
   h.mAt = Date.now();
@@ -3812,6 +4023,12 @@ function repaintTodo(h){
     '<div class="todoList'+(open && items.length > OPEN_N ? ' scroll' : '')+'">'+html+'</div>');
   const none = box && box.querySelector('.todoNone');
   if (none && items.length) none.remove();
+  const sl = document.getElementById('tdSub' + h.id);
+  if (sl) sl.textContent = todoSub(h, todayKey());
+  /* Everything else - the strike-through, the risk bar, the strip - catches up in one full
+     render the moment the box is let go. Nothing used to ask for that render, so the card
+     stayed stale until some unrelated tap happened to redraw it. */
+  jPending = true;
 }
 
 window.todoEdit = (id, itemId, el) => {
@@ -3858,6 +4075,7 @@ window.dropTodo = (id, itemId) => {
   const before = todoList(h).length;
   h.todos = todoList(h).filter(x => x.i !== itemId);
   if (h.todos.length === before) return;
+  if (!h.todos.length) h.emptyAt = todayKey();   // from here the card asks nothing
   h.made = Math.max(0, (+h.made || 0) - 1);
   h.mAt = Date.now();
   save();
@@ -3872,6 +4090,7 @@ window.tickTodo = (id, itemId) => {
   const before = todoList(h).length;
   h.todos = todoList(h).filter(x => x.i !== itemId);
   if (h.todos.length === before) return;        // already gone; do not bank it twice
+  if (!h.todos.length) h.emptyAt = todayKey();   // from here the card asks nothing
   const k = todayKey();
   h.days[k] = (typeof h.days[k] === 'number' ? h.days[k] : 0) + 1;
   h.mAt = Date.now();
@@ -4101,6 +4320,7 @@ function moodGraph(h){
              lo: reads.length ? Math.min.apply(null, reads) : null,
              hi: reads.length ? Math.max.apply(null, reads) : null,
              paused: !!(data.paused && data.paused[k] && !has(h.days,k)),
+             off: !has(h.days,k) && offDay(h, k),
              today: k===today,
              sel: !!(daySel && daySel.id===h.id && daySel.key===k) };
   });
@@ -4120,7 +4340,7 @@ function moodGraph(h){
   for (let n=0;n<idx.length-1;n++){
     const a = idx[n], b = idx[n+1];
     let bridged = true;
-    for (let m=a+1;m<b;m++){ if (!info[m].paused){ bridged = false; break; } }
+    for (let m=a+1;m<b;m++){ if (!info[m].paused && !info[m].off){ bridged = false; break; } }
     if (!bridged) continue;
     for (const edge of ['lo','hi'])
       segs += '<line x1="'+xOf(a).toFixed(2)+'%" y1="'+yOf(info[a][edge]).toFixed(1)+
@@ -4348,7 +4568,7 @@ function habitDayStats(h){
   const buckets = DOW_SHORT.map(function(){ return { n:0, hit:0, vals:[], real:[] }; });
   for (const d = new Date(from); d <= end; d.setDate(d.getDate()+1)){
     const k = keyFor(d);
-    if (paused[k] || dowOff(h, k)) continue;       // an excused day is not evidence
+    if (paused[k] || offDay(h, k)) continue;       // an excused day is not evidence
     const b = buckets[(d.getDay()+6)%7];
     b.n++;
     if (has(h.days, k)){
@@ -4643,6 +4863,40 @@ function scoreRow(h){
    same span the month grid shows - so they describe how you are now, not a year ago. */
 const WIN_DAYS = 91;                                    // 13 weeks, one screen of grid
 
+/* Every day ever logged, for the questions that are about all of them.
+
+   "Since you started" counts days recorded, points earned, perfect days, the longest run
+   and the best score across the whole record. It read the live file, and once the sweep
+   starts filing days away the live file is only the last 126 - so every one of those
+   figures would have quietly shrunk from mid-November while "days since start" kept
+   climbing. This stitches each card's archived days back onto its live ones, the same way
+   export does, and replays the ladder over the whole of it for the points.
+
+   The archive is this device's own file. A phone set up fresh from sync has no archive
+   until an export is restored onto it - importing a backup puts the old days back, and the
+   next sweep files them into a local archive again. */
+function fullRecord(){
+  const arc = archiveLoad().cards || {};
+  const whole = h => {
+    const s = arc[h.id] || {};
+    return { ...h, arch: undefined,
+             days: { ...(s.days || {}), ...(h.days || {}) },
+             idle: { ...(s.idle || {}), ...(h.idle || {}) } };
+  };
+  const all  = data.habits.filter(h => !isScore(h)).map(whole);  // points: hidden cards count
+  const live = all.filter(h => !h.hidden);                          // perfect: the current set
+  const end = midnight();
+  const pts = all.map(h => { const st = habitStart(h);
+    return st ? chainReplay(h, null, st, end).points : {}; });
+  return {
+    logged:  k => all.some(h => has(h.days, k)),
+    score:   k => pts.reduce((s, p) => s + (p[k] || 0), 0),
+    // Every card that asked something of the day was logged.
+    perfect: k => { const due = live.filter(h => !offDay(h, k));
+                    return due.length > 0 && due.every(h => has(h.days, k)); }
+  };
+}
+
 function scoreInsights(){
   /* Visible cards only, and only because of what this list is USED for: "every habit
      logged" and the perfect-day count, which ask whether the current set was completed.
@@ -4655,13 +4909,14 @@ function scoreInsights(){
   const first = firstLogAll();
   if (!first) return { sections: [], note: 'Nothing logged yet.' };
 
+  const rec = fullRecord();
   const end = midnight();
   const all = [];
   for (const d = new Date(first); d <= end; d.setDate(d.getDate()+1)){
     const k = keyFor(d);
-    all.push({ k, d:new Date(d), dow:(d.getDay()+6)%7, logged:dayHasLog(k),
-               score:dayScore(k), paused:!!paused[k],
-               perfect: habits.every(h => has(h.days, k)) });
+    all.push({ k, d:new Date(d), dow:(d.getDay()+6)%7, logged:rec.logged(k),
+               score:rec.score(k), paused:!!paused[k],
+               perfect: rec.perfect(k) });
   }
   const active = all.filter(x => x.logged);
   if (active.length < 7)
@@ -4770,7 +5025,7 @@ function scoreInsights(){
     let sp = 0, hit = 0;
     for (const d = new Date(s); d <= end; d.setDate(d.getDate()+1)){
       const k = keyFor(d);
-      if (paused[k]) continue;
+      if (paused[k] || offDay(h, k)) continue;        // a day off is not a day missed
       sp++; if (has(h.days, k)) hit++;
     }
     if (sp >= 7) rates.push({ name:h.name, pct: Math.round(hit/sp*100) });
@@ -5025,7 +5280,7 @@ function timerFields(){
         '<input id="fTsec" class="spendIn hm" inputmode="numeric" value="'+(secs%60)+'" '+
           'aria-label="Seconds" placeholder="0"><span class="hmU">s</span>'+
       '</div>'+
-      '<p class="hint">Anything from a few seconds to an hour.</p>'+
+      '<p class="hint">Anything from a few seconds to two hours.</p>'+
     '</div>'+
     '<div class="fld">'+
       '<label class="lbl">When it ends</label>'+
@@ -5149,7 +5404,8 @@ function editorHTML(title){
     '</div>'+
     ((form.type === 'budget' || form.type === 'hours') ? budgetFields() : '')+
     (form.type === 'timer' ? timerFields() : '')+
-    dowFields();
+    // The score card has no days of its own to switch off - it only adds up the others.
+    (form.type === 'score' ? '' : dowFields());
 
   if (form.type === 'score'){                                // stripped editor - nothing to name/cue
     return '<div class="editor">'+
@@ -5161,15 +5417,7 @@ function editorHTML(title){
     '</div>';
   }
 
-  const clearBlock = !eh ? '' :
-    (clearHist === eh.id
-      ? '<div class="chip" style="margin:16px 0 0">'+
-          '<span class="chipDate">Clear all '+Object.keys(eh.days||{}).length+' logged days? Can’t be undone.</span>'+
-          '<button class="chipBtn clear" onclick="doClearHist()">Clear</button>'+
-          '<button class="chipBtn" onclick="cancelClearHist()">Keep</button>'+
-        '</div>'
-      : '<button class="link red" style="margin-top:14px;padding-left:0" onclick="askClearHist()">Clear all logged days</button>');
-  return '<div class="editor">'+
+  return '<div class="editor" data-gen="'+formGen+'">'+
     '<h3>'+title+'</h3>'+
     '<div class="fld">'+
       '<label class="lbl" for="fName">Name</label>'+
@@ -5202,11 +5450,14 @@ function editorHTML(title){
       '<button class="btnP" onclick="commit()">Save</button>'+
       '<button class="btnG" onclick="cancelEdit()">Cancel</button>'+
     '</div>'+
-    clearBlock +
   '</div>';
 }
 
 function syncPanel(){
+  const sv = k => syncDraft ? syncDraft[k] : (sync[k] || '');
+  // Masked by default: this panel gets opened with other people around, and the token is
+  // a write key to the data repo. autocomplete off, so no browser offers to "save" either.
+  const secret = syncShow ? 'text' : 'password';
   const open = syncOpen ? (
     '<div class="divider"></div>'+
     '<div class="syncTitle">SYNC SETTINGS</div>'+
@@ -5225,11 +5476,15 @@ function syncPanel(){
     (syncReady() ? '<p class="syncTarget">Writing to <strong>'+esc(sync.owner.trim())+'/'+
       esc(sync.repo.trim())+'</strong> \u00b7 '+esc(syncFile())+'</p>' : '')+
     '<div style="display:flex;flex-direction:column;gap:10px;margin-top:12px">'+
-      '<input id="inOwner" value="'+esc(sync.owner)+'" placeholder="GitHub username">'+
-      '<input id="inRepo"  value="'+esc(sync.repo)+'"  placeholder="Private data repo (e.g. bloupunt-data)">'+
-      '<input id="inFile"  value="'+esc(sync.file||'')+'"  placeholder="File name (blank = bloupunt.json)">'+
-      '<input id="inToken" value="'+esc(sync.token)+'" placeholder="Fine-grained access token">'+
-      '<input id="inPass"  value="'+esc(sync.pass)+'"  placeholder="Encryption passphrase">'+
+      '<input id="inOwner" value="'+esc(sv('owner'))+'" placeholder="GitHub username">'+
+      '<input id="inRepo"  value="'+esc(sv('repo'))+'"  placeholder="Private data repo (e.g. bloupunt-data)">'+
+      '<input id="inFile"  value="'+esc(sv('file'))+'"  placeholder="File name (blank = bloupunt.json)">'+
+      '<input id="inToken" type="'+secret+'" autocomplete="off" value="'+esc(sv('token'))+'" '+
+        'placeholder="Fine-grained access token">'+
+      '<input id="inPass"  type="'+secret+'" autocomplete="off" value="'+esc(sv('pass'))+'" '+
+        'placeholder="Encryption passphrase">'+
+      '<button type="button" class="link" style="align-self:flex-start;padding-left:0" '+
+        'onclick="toggleSyncShow()">'+(syncShow ? 'Hide' : 'Show')+' token and passphrase</button>'+
       '<p class="hint">Any characters, any length. Capitals and spaces inside it count, '+
         'so \u201cMy Dog Rex\u201d and \u201cmydogrex\u201d are different passphrases. Spaces at the very '+
         'start or end are dropped. It must match the file it is opening, exactly.</p>'+
@@ -5354,6 +5609,7 @@ function render(){
                               '.todoIn[data-h="'+jTyping+'"]'))
     jTyping = null;
   if (jTyping !== null){ jPending = true; return; }
+  captureTyping();                  // before anything typed is replaced
   _chainCache = {};                 // chain/point replay is per-render
   const tier = currentTier();
   document.documentElement.style.setProperty('--bg', tier.bg);
@@ -5364,14 +5620,18 @@ function render(){
   const today = todayKey();
   const habits = liveHabits().filter(h => !isScore(h));   // the score is not a habit you complete
   const chain = habits.filter(h => !isCounter(h));        // toggles only, for the ~3-habit cap
-  const doneCount = habits.filter(h => has(h.days, today)).length;
-  const allDone = habits.length > 0 && doneCount === habits.length;
+  // "3 of 4 recorded" counts the cards that ask something of today. A weekday card on a
+  // Saturday, or a to-do card with nothing on its list, is not one left undone.
+  const due = dueToday();
+  const doneCount = due.filter(h => has(h.days, today)).length;
+  const allDone = due.length > 0 && doneCount === due.length;
   const p = perfectStreak();
 
   const subtitle = screen === 'today'
     ? (habits.length === 0 ? 'Nothing set up yet'
+      : !due.length ? 'Nothing due today'
       : allDone ? (p >= 7 ? p+' clean days' : 'All recorded')
-      : doneCount+' of '+habits.length+' recorded')
+      : doneCount+' of '+due.length+' recorded')
     : 'Set the cue, the anchor, and the floor';
 
   let body;
@@ -5523,12 +5783,51 @@ checkMilestones();
 if (celebration) render();
 if (syncReady()) pullRemote();
 
-// New day while the app sits open in the background — re-render so "today" is right.
+/* A timer that outlived the page. `timerRun` is restored from storage, but the tick that
+   advances it was only ever started by GO - so after a reload (Android closing the app
+   mid-session, or an update reloading it) the card said Running with a frozen clock and no
+   end, until Stop. Resume it if time is left; if it ran out while the page was gone, finish
+   it now. The running sound does not come back: audio needs a tap to start. */
+bootStep('timerResume', () => {
+  if (!timerRun) return;
+  const card = data.habits.find(x => x.id === timerRun.id);
+  if (card && timerLeft() > 0) timerArm();
+  else {
+    timerStop(true);
+    if (card){
+      notice = { ok:true, msg: card.name + ' finished while the app was closed' };
+      clearTimeout(noticeTimer);
+      noticeTimer = setTimeout(() => { notice = null; render(); }, 6000);
+    }
+  }
+  render();
+});
+
+/* A new day while the app sits open. Android keeps a home-screen app alive overnight, and
+   the change used to be noticed only by a once-a-minute timer - so for up to a minute after
+   opening it in the morning the page still showed yesterday, and every tick and +/- still
+   carried yesterday's date in its onclick. The morning's first tap went to yesterday.
+   Now it is checked the moment the app comes back into view, and again on the way into
+   every tap: a tap that lands on a stale page is swallowed and the page redrawn, rather
+   than logged against the wrong day. */
 let lastDay = todayKey();
-setInterval(() => {
+function newDay(){
   const t = todayKey();
-  if (t !== lastDay){ lastDay = t; render(); }
-}, 60000);
+  if (t === lastDay) return false;
+  lastDay = t;
+  // Drafts are held per day, so yesterday's words cannot reappear in today's box. They
+  // were saved to yesterday as they were typed; this drops only the redraw copy.
+  for (const k of Object.keys(jDraft)) if (!k.endsWith('|' + t)) delete jDraft[k];
+  render();
+  return true;
+}
+setInterval(newDay, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) newDay(); });
+window.addEventListener('focus', newDay);
+window.addEventListener('pageshow', newDay);
+document.addEventListener('click', e => {
+  if (newDay()){ e.stopPropagation(); e.preventDefault(); }
+}, true);
 
 // Service worker — offline cold launch. Relative path so it scopes to /bloupunt/.
 // Registration failure is non-fatal: the app already works from localStorage.
