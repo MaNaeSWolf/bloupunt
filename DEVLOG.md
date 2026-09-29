@@ -3065,6 +3065,22 @@ with a new backup and with an old-style one: the deleted card stays deleted both
 
 → `sw.js v88`, `BUILD v88`.
 
+### 2026-09-29 (later again) — "Clear to here" goes too
+
+The v88 removal was aimed at the wrong button. What was actually meant was "Clear to here" in
+the day chip: delete this day and every day before it, one confirm away, sitting among
+buttons that each edit a single day. It was built to scrub the numbers a card kept when
+converted from another type, and `commit()` has done that itself since changing family started
+clearing the days. "Clear all logged days" stays removed as well - neither is needed, and the
+honest way to be rid of a card's history is to delete the card. A single day is still cleared
+from its chip.
+
+Removed `chipCut`, `askClearTo`, `cancelClearTo`, `doClearTo`, the confirm branch in `dayChip`
+and the button. Verified live: the chip shows no bulk clear, stepping between days still works
+(it used to reset `chipCut`), and the single-day clear removes exactly that day.
+
+→ `sw.js v89`, `BUILD v89`.
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it

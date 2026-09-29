@@ -615,13 +615,12 @@ let noticeTimer = null;
 let syncDiag  = null;      // [{ok, text}] - result of Test connection, panel only
 let pauseOpen = false;      // pause-days chooser open
 let dayEdit   = null;       // { id, key } — the strip day-edit chip target
-let chipCut   = null;       // day key whose "clear to here" is awaiting confirm
 let daySel    = null;       // { id, key } — a day picked in a week view, read-only
 /* The page's OWN build id, bumped with the worker's VERSION. The worker reporting its
    version proves only which worker is running - not which HTML it handed you. When the
    two disagree, the shell in the cache is stale, and the page can say so instead of
    quietly showing a build the user does not have. */
-const BUILD = 'bloupunt-v88';
+const BUILD = 'bloupunt-v89';
 let swVersion = '';         // reported by the service worker, shown under Manage
 let flashIds  = {};         // habit ids briefly outlined after an undo
 let flashTimer = null;
@@ -1873,7 +1872,7 @@ window.setScreen = s => {
   jrnl = null; render();
 };
 
-window.toggleExpand = id => { expanded = (expanded === id) ? null : id; dayEdit = null; chipCut = null; render(); };
+window.toggleExpand = id => { expanded = (expanded === id) ? null : id; dayEdit = null; render(); };
 
 // Counter logging. Net value persists even at 0 - the goal is to log, so a day
 // with any interaction counts as logged. No milestones/flash: counters are trackers.
@@ -2187,7 +2186,7 @@ window.openDay  = (id, k) => {
   daySel  = dayEdit ? { id, key:k } : null;     // keep the calendars pointing at one day
   render();
 };
-window.closeDay = () => { dayEdit = null; daySel = null; chipCut = null; jrnl = null; render(); };
+window.closeDay = () => { dayEdit = null; daySel = null; jrnl = null; render(); };
 
 /* Picking a day in a week view is READ-ONLY. It answers "what was that day?" — the
    value appears above the day you tapped, and the SAME day is ringed in every calendar
@@ -2234,28 +2233,17 @@ document.addEventListener('click', e => {
   setTimeout(() => { if (daySel && !dayEdit){ daySel = null; render(); } }, 0);
 }, true);
 
-/* Clear this day and everything before it. A habit converted from another type keeps
-   the old type's numbers, and they are not harmless: a counter's net-zero day is a
-   stored 0, which as a clock time is midnight and drags every average toward it. Those
-   days also still count as LOGGED, so they inflate the chain and the points too.
-   Deleting the keys is the only honest fix - the alternative, quietly ignoring zeros,
-   would throw away a real midnight log and hide the problem rather than solve it. */
-window.askClearTo = k => { chipCut = k; render(); };
-window.cancelClearTo = () => { chipCut = null; render(); };
-window.doClearTo = (id, k) => {
-  const h = data.habits.find(x => x.id === id);
-  if (h) for (const key of Object.keys(h.days)) if (key <= k){
-    delete h.days[key];
-    if (h.extra) delete h.extra[key];
-  }
-  chipCut = null;
-  save(); render();
-};
+/* "Clear to here" lived here: delete this day and every day before it. It was built to
+   scrub the numbers a card kept when converted from another type - and commit() has
+   dropped those itself since changing family started clearing the days. What was left was
+   a bulk delete of history one confirm away inside the day editor, where every other
+   button edits one day. Removed in v89, with "Clear all logged days" gone in v88: the way
+   to be rid of a card's history is to delete the card. One day is still cleared from its
+   day chip. */
 // Step the open chip one day at a time, so a run of days can be corrected without
 // hunting for each cell. Never walks into the future.
 window.stepDay = (id, delta) => {
   if (!dayEdit || dayEdit.id !== id) return;
-  chipCut = null;
   const d = parseKey(dayEdit.key);
   d.setDate(d.getDate() + delta);
   if (d > midnight()) return;
@@ -3158,22 +3146,12 @@ function dayChip(h){
       : '<button class="chipBtn" onclick="setDone('+h.id+',\''+k+'\')">Mark done</button>';
   }
   const atToday = k >= todayKey();
-  const older = Object.keys(h.days).filter(x => x <= k).length;
-  if (chipCut === k)
-    return '<div class="chip">'+
-      '<span class="chipDate">Clear '+older+' day'+(older===1?'':'s')+' up to and including '+
-        label+'? Can\u2019t be undone.</span>'+
-      '<button class="chipBtn clear" onclick="doClearTo('+h.id+',\''+k+'\')">Clear</button>'+
-      '<button class="chipBtn" onclick="cancelClearTo()">Keep</button>'+
-    '</div>';
   return '<div class="chip">'+
     '<button class="chipNav" aria-label="Previous day" onclick="stepDay('+h.id+',-1)">\u2039</button>'+
     '<span class="chipDate">'+label+'</span>'+
     '<button class="chipNav"'+(atToday?' disabled':'')+' aria-label="Next day" '+
       'onclick="stepDay('+h.id+',1)">\u203a</button>'+
     controls +
-    (older ? '<button class="chipBtn clear" title="Clear this day and everything before it" '+
-      'onclick="askClearTo(\''+k+'\')">Clear to here</button>' : '')+
     '<button class="chipX" aria-label="Close" onclick="closeDay()">×</button>'+
   '</div>';
 }
