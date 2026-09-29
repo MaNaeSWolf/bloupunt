@@ -3112,6 +3112,10 @@ on first fetch like everything else.
 
 Verified locally: manifest served and parsed, every declared icon loads at its declared size,
 start URL resolves to the app. Previewed the maskable icon under squircle and circle masks.
+Live: every file byte-identical to the repo, manifest served as `application/manifest+json`.
+
+**Confirmed on the phone:** installed from Brave via Install app, opens in its own window with
+the new icon, data intact (same origin, same storage). The old bookmark shortcut can go.
 
 → `sw.js v90`, `BUILD v90`.
 
@@ -3125,9 +3129,10 @@ start URL resolves to the app. Previewed the maskable icon under squircle and ci
   the browser "more cleverly."
 - ~~Counter backfill in both directions.~~ **Done 2026-07-11** — the day-edit chip
   offers `−` and `+` regardless of habit type.
-- **Backfill is capped at ~3 weeks** (the strip window) by design. Anything older is
-  view-only; the only way to change it is the editor's "Clear all logged days".
-  Revisit only if a genuine need to edit older history appears.
+- **Editing past days** goes through the month grid, which reaches back 18 weeks - exactly
+  `RETAIN_DAYS`. Anything older is archived and read-only. There is no bulk clear any more
+  ("Clear all logged days" went in v88, "Clear to here" in v89): one day is cleared from its
+  chip, and the way to be rid of a card's history is to delete the card.
 - **Optional daily goal for `+` habits.** Considered and deferred — the current rule
   is "logging anything counts." Revisit if a target-based streak is ever wanted.
 - **Per-cell pause editing.** Pause is set forward-only via the chooser; there is no
@@ -3136,6 +3141,13 @@ start URL resolves to the app. Previewed the maskable icon under squircle and ci
   clashing day, so two devices editing different days of the same card can still lose one.
   `pushRemote` also PUTs without merging first, and an un-tick has no tombstone, so another
   device's copy brings it back. Only matters with one person on two devices.
+- **The archive is per device.** `bloupunt-archive` lives in this browser's storage and is not
+  synced. A phone set up fresh from sync has only the last 126 days until a backup is restored
+  onto it (import puts the old days back; the next sweep files them locally). Export
+  regularly - it is the only copy of anything older than the window.
+- **Maskable icon on a circle launcher.** Full-bleed, the wordmark's "b" and "t" sit right at
+  the rim of a circle mask (Pixel). Clean on Samsung's squircle. A version with the wordmark
+  drawn a little further in would fix it - as a painting, not by code (see v90).
 
 ## Things that will bite you
 
