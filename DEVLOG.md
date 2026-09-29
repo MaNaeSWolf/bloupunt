@@ -3081,6 +3081,40 @@ and the button. Verified live: the chip shows no bulk clear, stepping between da
 
 → `sw.js v89`, `BUILD v89`.
 
+### 2026-09-29 (evening) — Installable, with a real icon
+
+Bloupunt was living as a browser bookmark on the home screen. It is now an installable web
+app: `manifest.webmanifest` gives it a name, a standalone window and icons, so Brave or Chrome
+on Android offers **Install app** from the menu. No store, no developer account, no sideload -
+the installed app is the same site at the same address, so it opens on the same storage and
+nothing has to move.
+
+**The icon** is a new painting - the mountain, the sun, stepping stones up the path, and the
+wordmark - in two versions: `icons/source.webp` with rounded corners, and
+`icons/source-full.webp` (2000px) full-bleed to the edges. `icons/make_icons.py` builds every
+size by plain downscaling:
+- `icon-192/512.png`, `favicon-48.png` - purpose `any`, from the rounded painting, for places
+  that show an icon as-is.
+- `maskable-192/512.png`, `apple-touch-icon.png` - from the full-bleed painting. A launcher
+  cuts a maskable icon into its own shape (squircle on Samsung, circle on Pixel) and iOS
+  fills transparency black, so these have to fill the square.
+
+Growing the rounded painting's corners out by code was tried first and looked wrong - a
+ghost of the old corners, streaks in the sky - so a full-bleed version was painted instead.
+Every icon is now a straight downscale of a painted original; nothing is invented. At full
+bleed the wordmark sits right at the rim of a circle mask (Pixel) - clean on Samsung's squircle.
+
+The two inline SVG icons in `<head>` are gone: a launcher cannot use an SVG data URI for a
+home-screen icon. **The single-file property holds for the app, not the icon**: opened from
+`file://` everything still works, it just has no icon. The service worker does not precache
+the new files on purpose - one missing file would fail the whole install step - and caches them
+on first fetch like everything else.
+
+Verified locally: manifest served and parsed, every declared icon loads at its declared size,
+start URL resolves to the app. Previewed the maskable icon under squircle and circle masks.
+
+→ `sw.js v90`, `BUILD v90`.
+
 ## Still to do / open items
 
 - **Keep this log current.** Every shell change also bumps `sw.js VERSION` — note it
